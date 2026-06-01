@@ -1,6 +1,6 @@
 # codex-imagegen-cli
 
-Scriptable image generation for Codex users. The CLI uses your existing Codex ChatGPT login, calls the same hosted `image_generation` tool path used by openai/codex, and writes the returned image bytes to predictable local paths.
+Scriptable image generation for Codex users. The CLI uses your existing Codex ChatGPT login and writes generated or edited images to predictable local paths.
 
 It does not require `OPENAI_API_KEY`, a locally installed Codex `imagegen` skill, or `codex exec`.
 
@@ -9,6 +9,11 @@ $ codex-imagegen --version
 codex-imagegen 0.1.0
 
 $ codex-imagegen generate --prompt "A studio product photo of a ceramic mug" --out output/mug.png --dry-run
+```
+
+Dry-run request excerpt:
+
+```json
 {
   "method": "POST",
   "url": "https://chatgpt.com/backend-api/codex/responses",
@@ -17,8 +22,23 @@ $ codex-imagegen generate --prompt "A studio product photo of a ceramic mug" --o
   },
   "payload": {
     "model": "gpt-5.5",
+    "instructions": "Use the available image generation tool to generate exactly one PNG image for the user request. Do not use any other tool.",
+    "input": [
+      {
+        "type": "message",
+        "role": "user",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "A studio product photo of a ceramic mug"
+          }
+        ]
+      }
+    ],
     "tools": [{"type": "image_generation", "output_format": "png"}],
     "tool_choice": "auto",
+    "parallel_tool_calls": false,
+    "store": false,
     "stream": true
   },
   "outputs": ["output/mug.png"]
@@ -135,17 +155,17 @@ Each line can be either a JSON string prompt or an object with:
 - `--codex-home PATH`: read auth from another Codex home directory
 - `--model MODEL`: override the Codex reasoning model; defaults to your Codex config
 - `--base-url URL`: override the Codex backend base URL
-- `--backend responses|direct`: choose the stable hosted-tool flow or the experimental direct image endpoint
-- `--image-model MODEL`: image model preference; exact control is only available with `--backend direct`
-- `--background auto|transparent|opaque`: background preference; exact control is only available with `--backend direct`
-- `--quality auto|low|medium|high`: quality preference; exact control is only available with `--backend direct`
-- `--size auto|1024x1024`: size preference; exact control is only available with `--backend direct`
+- `--backend responses|direct`: choose the stable Codex flow or the experimental direct image endpoint; default is `responses`
+- `--image-model MODEL`: image model preference; with the default backend this is added to the prompt as guidance
+- `--background auto|transparent|opaque`: background preference; with the default backend this is added to the prompt as guidance
+- `--quality auto|low|medium|high`: quality preference; with the default backend this is added to the prompt as guidance
+- `--size auto|1024x1024`: size preference; with the default backend this is added to the prompt as guidance
 - `--n COUNT`: request multiple output images; the stable backend runs one streamed response per image
 - `--dry-run`: print the request shape without reading auth or contacting the backend
 
 ## How It Works
 
-The stable openai/codex image flow uses the normal Codex `/responses` endpoint with a hosted tool spec:
+The stable openai/codex image flow uses the normal Codex `/responses` endpoint with an image-generation tool spec:
 
 ```json
 {"type": "image_generation", "output_format": "png"}
@@ -165,18 +185,23 @@ For ChatGPT-authenticated Codex sessions, that provider uses:
 
 - base URL: `https://chatgpt.com/backend-api/codex`
 - stable path: `/responses`
-- hosted tool: `image_generation`
+- image tool type: `image_generation`
 - bearer token: the ChatGPT access token from Codex auth
 - account header: `ChatGPT-Account-ID` when present
 - Codex default headers: `originator` and a Codex-shaped `User-Agent`
 
 `codex-imagegen-cli` mirrors that stable path directly. It reads Codex auth locally, refreshes an expired ChatGPT token through the same OAuth refresh client ID used by Codex, streams the `/responses` request, finds the `image_generation_call` result, and decodes the base64 image into files.
 
-There is also an under-development openai/codex extension that calls `/images/generations` and `/images/edits` directly. In current real-world testing that endpoint returned JSON 404 for this account/client path, so this CLI keeps it behind `--backend direct` instead of using it by default.
+There is also an under-development openai/codex extension that calls `/images/generations` and `/images/edits` directly. This CLI keeps that path behind `--backend direct` for development and compatibility testing; normal usage should keep the default `responses` backend.
+
+## Limitations
+
+The default `responses` backend reliably supports scriptable generate/edit workflows, but it does not expose every lower-level Image API parameter as a first-class request field. Flags such as `--size`, `--quality`, `--background`, and `--image-model` are treated as prompt guidance with the default backend.
 
 ## Development
 
 ```bash
+uv lock --check
 uv sync --dev
 uv run pytest
 uv run ruff check .

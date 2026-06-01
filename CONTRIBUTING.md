@@ -5,6 +5,7 @@ Contributions are welcome when they improve the CLI, Codex-auth image backend be
 ## Development Setup
 
 ```bash
+uv lock --check
 uv sync --dev
 uv run pytest
 uv run ruff check .
@@ -17,6 +18,7 @@ Keep pull requests focused and include a short note about the behavior changed. 
 Before opening a PR, run:
 
 ```bash
+uv lock --check
 uv run pytest
 uv run ruff check .
 uv run python -m build
@@ -25,4 +27,4 @@ uv run python -m twine check dist/*
 
 ## Project Boundaries
 
-`codex-imagegen-cli` mirrors the stable Codex ChatGPT `/responses` hosted `image_generation` path from openai/codex. It should not require `OPENAI_API_KEY`, shell out to `codex exec`, print auth tokens, or depend on a locally installed Codex skill.
+`codex-imagegen-cli` mirrors the stable Codex ChatGPT image-generation path from openai/codex. It should not require `OPENAI_API_KEY`, shell out to `codex exec`, print auth tokens, or depend on a locally installed Codex skill.

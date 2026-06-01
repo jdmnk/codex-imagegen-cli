@@ -1,5 +1,5 @@
 name: Feature request
-description: Suggest an improvement to the CLI, docs, tests, or bundled skill.
+description: Suggest an improvement to the CLI, docs, tests, or packaging.
 title: "[Feature]: "
 labels: ["enhancement"]
 body:

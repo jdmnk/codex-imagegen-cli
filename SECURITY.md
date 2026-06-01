@@ -13,3 +13,5 @@ The expected first response time is within 7 days.
 ## Scope
 
 Relevant issues include unsafe file writes, unintended disclosure of Codex auth tokens, unsafe token refresh behavior, unintended disclosure of prompts or local paths, packaging supply-chain problems, and vulnerabilities in GitHub Actions.
+
+Do not attach `auth.json`, bearer tokens, refresh tokens, generated private images, or private prompts to public issues.

@@ -457,7 +457,7 @@ def _responses_payload(
         for image in images:
             content.append({"type": "input_image", "image_url": _data_url_for_image(image)})
     instructions = (
-        "Use the image_generation tool to generate exactly one PNG image for the user request. "
+        "Use the available image generation tool to generate exactly one PNG image for the user request. "
         "Do not use any other tool."
     )
     if mode == "edit":
@@ -741,13 +741,13 @@ def _add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--codex-home", help="Codex home directory. Defaults to $CODEX_HOME or ~/.codex.")
     parser.add_argument(
         "--model",
-        help="Codex reasoning model for the hosted image_generation tool. Defaults to Codex config.",
+        help="Codex reasoning model. Defaults to Codex config.",
     )
     parser.add_argument(
         "--backend",
         choices=["responses", "direct"],
         default="responses",
-        help="Backend path to use. Default is the stable hosted-tool responses path.",
+        help="Backend path to use. Default is the stable responses path.",
     )
     parser.add_argument(
         "--base-url",

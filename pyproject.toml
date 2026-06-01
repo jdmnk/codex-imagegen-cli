@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "codex-imagegen-cli"
 version = "0.1.0"
-description = "Scriptable image generation CLI that uses Codex ChatGPT auth."
+description = "Scriptable image generation CLI using Codex ChatGPT auth."
 readme = "README.md"
 requires-python = ">=3.9"
 license = "Apache-2.0"

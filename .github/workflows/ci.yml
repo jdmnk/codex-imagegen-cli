@@ -29,8 +29,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      - name: Check lockfile
+        run: uv lock --check
+
       - name: Install dependencies
-        run: uv sync --dev
+        run: uv sync --frozen --dev
 
       - name: Lint
         run: uv run ruff check .
