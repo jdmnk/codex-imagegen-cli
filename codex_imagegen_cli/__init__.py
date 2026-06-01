@@ -1,3 +1,3 @@
-"""Scriptable wrapper for Codex imagegen subagents."""
+"""Scriptable image generation with Codex ChatGPT auth."""
 
 __version__ = "0.1.0"
