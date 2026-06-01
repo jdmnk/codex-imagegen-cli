@@ -1,53 +1,14 @@
 # codex-imagegen-cli
 
-Scriptable image generation for Codex users. The CLI uses your existing Codex ChatGPT login and writes generated or edited images to predictable local paths.
-
-It does not require `OPENAI_API_KEY`, a locally installed Codex `imagegen` skill, or `codex exec`.
+Image generation CLI using Codex's integrated image gen abilities. The CLI uses your existing Codex ChatGPT login and does not require an OpenAI API key.
 
 ```text
-$ codex-imagegen --version
-codex-imagegen 0.1.0
-
-$ codex-imagegen generate --prompt "A studio product photo of a ceramic mug" --out output/mug.png --dry-run
-```
-
-Dry-run request excerpt:
-
-```json
-{
-  "method": "POST",
-  "url": "https://chatgpt.com/backend-api/codex/responses",
-  "headers": {
-    "Authorization": "Bearer <redacted>"
-  },
-  "payload": {
-    "model": "gpt-5.5",
-    "instructions": "Use the available image generation tool to generate exactly one PNG image for the user request. Do not use any other tool.",
-    "input": [
-      {
-        "type": "message",
-        "role": "user",
-        "content": [
-          {
-            "type": "input_text",
-            "text": "A studio product photo of a ceramic mug"
-          }
-        ]
-      }
-    ],
-    "tools": [{"type": "image_generation", "output_format": "png"}],
-    "tool_choice": "auto",
-    "parallel_tool_calls": false,
-    "store": false,
-    "stream": true
-  },
-  "outputs": ["output/mug.png"]
-}
+$ codex-imagegen generate --prompt "A 32x32 retro RPG pixel icon of an iron helmet, no text" --out output/icons/iron-helmet.png --dry-run
 ```
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
 - `uv`
 - Codex logged in with ChatGPT auth
 
@@ -80,8 +41,8 @@ Run a dry run:
 
 ```bash
 uv run codex-imagegen generate \
-  --prompt "A studio product photo of a ceramic mug" \
-  --out output/imagegen/mug.png \
+  --prompt "A 32x32 retro RPG pixel icon of an iron helmet, no text" \
+  --out output/icons/iron-helmet.png \
   --dry-run
 ```
 
@@ -91,34 +52,32 @@ To install it as a user command from the checkout:
 uv tool install -e .
 ```
 
-PyPI publishing is not active for `0.1.0`; the supported first-run path is source checkout or a GitHub release artifact.
-
 ## Generate
 
 ```bash
 codex-imagegen generate \
-  --prompt "A clean product photo of a ceramic coffee mug on a white studio background" \
-  --out output/imagegen/mug.png
+  --prompt "A 32x32 retro RPG pixel icon of a steel longsword with a blue grip, no text" \
+  --out output/icons/steel-longsword.png
 ```
 
 Request multiple images:
 
 ```bash
 codex-imagegen generate \
-  --prompt "Three logo moodboard directions for a calm developer tool" \
-  --out output/imagegen/moodboard.png \
+  --prompt "Three 32x32 retro RPG equipment icons: a bronze shield, a silver ring, and a healing potion, no text" \
+  --out output/icons/equipment-set.png \
   --n 3
 ```
 
-Multiple outputs are written as `moodboard-1.png`, `moodboard-2.png`, and so on.
+Multiple outputs are written as `equipment-set-1.png`, `equipment-set-2.png`, and so on.
 
 ## Edit
 
 ```bash
 codex-imagegen edit \
-  --image input/product.png \
-  --prompt "Replace only the background with a warm sunset gradient; keep the product unchanged" \
-  --out output/imagegen/product-sunset.png
+  --image input/icons/iron-sword.png \
+  --prompt "Turn this into a fire-enchanted sword icon while keeping the same retro RPG pixel-art style, silhouette, and no text" \
+  --out output/icons/fire-sword.png
 ```
 
 Edit accepts one to five `--image` inputs, matching the current Codex image tool limit.
@@ -130,8 +89,9 @@ Batch mode runs JSONL jobs sequentially.
 ```bash
 mkdir -p tmp/imagegen
 cat > tmp/imagegen/jobs.jsonl <<'EOF'
-{"prompt":"A compact shuttle parked in a cavernous hangar","out":"shuttle.png"}
-{"prompt":"A product photo with a new background","images":["input/product.png"],"mode":"edit","out":"product.png"}
+{"prompt":"A 32x32 retro RPG pixel icon of an iron helmet, no text","out":"iron-helmet.png"}
+{"prompt":"A 32x32 retro RPG pixel icon of leather boots with tiny silver buckles, no text","out":"leather-boots.png"}
+{"prompt":"Make this shield look ice-enchanted while keeping the same retro RPG pixel-art style","images":["input/icons/wooden-shield.png"],"mode":"edit","out":"ice-shield.png"}
 EOF
 
 codex-imagegen batch \
@@ -154,8 +114,8 @@ Each line can be either a JSON string prompt or an object with:
 - `--auth-file PATH`: read a specific Codex `auth.json`
 - `--codex-home PATH`: read auth from another Codex home directory
 - `--model MODEL`: override the Codex reasoning model; defaults to your Codex config
-- `--base-url URL`: override the Codex backend base URL
-- `--backend responses|direct`: choose the stable Codex flow or the experimental direct image endpoint; default is `responses`
+- `--base-url URL`: override the Codex backend URL for development
+- `--backend responses|direct`: choose the Codex request path; keep the default unless debugging compatibility
 - `--image-model MODEL`: image model preference; with the default backend this is added to the prompt as guidance
 - `--background auto|transparent|opaque`: background preference; with the default backend this is added to the prompt as guidance
 - `--quality auto|low|medium|high`: quality preference; with the default backend this is added to the prompt as guidance
@@ -165,38 +125,14 @@ Each line can be either a JSON string prompt or an object with:
 
 ## How It Works
 
-The stable openai/codex image flow uses the normal Codex `/responses` endpoint with an image-generation tool spec:
+`codex-imagegen-cli` reuses your normal Codex login. On each run it:
 
-```json
-{"type": "image_generation", "output_format": "png"}
-```
+- reads Codex auth from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
+- refreshes the ChatGPT access token when needed
+- sends a Codex image-generation turn with your prompt and optional input images
+- streams the result and writes the final PNG to `--out`
 
-The relevant source paths are:
-
-- `codex-rs/core/src/tools/spec_plan.rs`
-- `codex-rs/core/src/tools/hosted_spec.rs`
-- `codex-rs/codex-api/src/endpoint/responses.rs`
-- `codex-rs/model-provider-info/src/lib.rs`
-- `codex-rs/model-provider/src/bearer_auth_provider.rs`
-- `codex-rs/login/src/auth/default_client.rs`
-- `codex-rs/login/src/auth/manager.rs`
-
-For ChatGPT-authenticated Codex sessions, that provider uses:
-
-- base URL: `https://chatgpt.com/backend-api/codex`
-- stable path: `/responses`
-- image tool type: `image_generation`
-- bearer token: the ChatGPT access token from Codex auth
-- account header: `ChatGPT-Account-ID` when present
-- Codex default headers: `originator` and a Codex-shaped `User-Agent`
-
-`codex-imagegen-cli` mirrors that stable path directly. It reads Codex auth locally, refreshes an expired ChatGPT token through the same OAuth refresh client ID used by Codex, streams the `/responses` request, finds the `image_generation_call` result, and decodes the base64 image into files.
-
-There is also an under-development openai/codex extension that calls `/images/generations` and `/images/edits` directly. This CLI keeps that path behind `--backend direct` for development and compatibility testing; normal usage should keep the default `responses` backend.
-
-## Limitations
-
-The default `responses` backend reliably supports scriptable generate/edit workflows, but it does not expose every lower-level Image API parameter as a first-class request field. Flags such as `--size`, `--quality`, `--background`, and `--image-model` are treated as prompt guidance with the default backend.
+Dry runs only print the planned request and output paths; they do not read auth or contact Codex.
 
 ## Development
 
