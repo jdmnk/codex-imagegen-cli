@@ -64,12 +64,12 @@ Request multiple images:
 
 ```bash
 codex-imagegen generate \
-  --prompt "Three 32x32 retro RPG equipment icons: a bronze shield, a silver ring, and a healing potion, no text" \
-  --out output/icons/equipment-set.png \
+  --prompt "A 32x32 retro RPG pixel icon of a bronze shield with a red gem, no text" \
+  --out output/icons/bronze-shield.png \
   --n 3
 ```
 
-Multiple outputs are written as `equipment-set-1.png`, `equipment-set-2.png`, and so on.
+Multiple outputs are written as `bronze-shield-1.png`, `bronze-shield-2.png`, and so on.
 
 ## Edit
 
