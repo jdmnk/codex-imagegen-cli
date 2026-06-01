@@ -134,6 +134,12 @@ Each line can be either a JSON string prompt or an object with:
 
 Dry runs only print the planned request and output paths; they do not read auth or contact Codex.
 
+## Important Note
+
+This project relies on Codex's current authenticated app behavior, not a public OpenAI Images API contract. Codex internals and account policies can change, so the CLI may stop working or behave differently after Codex updates.
+
+We will try to keep this project updated as long as this usage remains possible and allowed, but Codex could restrict or prevent this access in the future. Live generation uses your Codex account and counts against whatever Codex limits apply to that account.
+
 ## Development
 
 ```bash
