@@ -21,7 +21,13 @@ $ codex-imagegen generate \
     --out output/icons/iron-helmet.png
 ```
 
-> Uses your existing **Codex ChatGPT login** — no `OPENAI_API_KEY` required.
+Uses your existing **Codex ChatGPT login** — no `OPENAI_API_KEY` required.
+
+## Why this exists
+
+[Codex](https://github.com/openai/codex) (OpenAI's CLI coding agent) has image generation built in — but it's prompt-driven and agentic, not a scriptable command. There is no `codex image generate` subcommand, no `--size` or `--quality` flags, and the documented automation primitive (`codex exec`) emits assistant text, not image bytes.
+
+This CLI fills that gap by calling Codex's backend directly, using your existing ChatGPT subscription auth. No `OPENAI_API_KEY` neede, as it's not API billing — just the same image generation Codex uses internally, exposed as a proper scriptable tool with explicit control over **model**, **size**, **quality**, **background**, and **output** for `generate`, `edit`, and `batch` workflows.
 
 ## Requirements
 
@@ -153,9 +159,15 @@ Dry runs only print the planned request and output paths; they do not read auth 
 
 ## Important Note
 
-This project relies on Codex's current authenticated app behavior, not a public OpenAI Images API contract. Codex internals and account policies can change, so the CLI may stop working or behave differently after Codex updates.
+This project relies on Codex's current authenticated app behavior, not a public OpenAI Images API contract.
 
-We will try to keep this project updated as long as this usage remains possible and allowed, but Codex could restrict or prevent this access in the future. Live generation uses your Codex account and counts against whatever Codex limits apply to that account.
+A few things worth knowing:
+
+- **Subscription only.** The built-in Codex image generation path is gated to ChatGPT auth (Plus, Pro, Business, Edu, Enterprise). It is not available on the Free plan and does not work with an `OPENAI_API_KEY` session — that key routes to the Images API instead, under separate billing.
+- **Usage limits apply.** Image generations consume your Codex account's included limits, roughly 3–5× faster than a comparable non-image turn. OpenAI documents approximate credit costs per image size (e.g. ~5–6 credits for 1024×1024).
+- **No stable API contract.** Codex internals and account policies can change. The CLI may stop working or behave differently after a Codex update, and OpenAI has not documented this as a supported automation surface.
+
+We will try to keep this project updated as long as this usage remains possible and allowed.
 
 ## Development
 
