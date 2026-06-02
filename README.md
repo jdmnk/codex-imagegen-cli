@@ -113,7 +113,7 @@ Each line can be either a JSON string prompt or an object with:
 - `--cd PATH`: base directory for resolving relative paths
 - `--auth-file PATH`: read a specific Codex `auth.json`
 - `--codex-home PATH`: read auth from another Codex home directory
-- `--model MODEL`: override the Codex reasoning model; defaults to your Codex config
+- `--model MODEL`: override the Codex reasoning model used to run the Codex turn. This is separate from `--image-model`.
 - `--base-url URL`: override the Codex backend URL for development
 - `--backend responses|direct`: choose the Codex request path; keep the default unless debugging compatibility
 - `--image-model MODEL`: image model preference; with the default backend this is added to the prompt as guidance

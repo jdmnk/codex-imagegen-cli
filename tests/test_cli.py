@@ -69,6 +69,90 @@ def test_generate_dry_run_prints_codex_request(tmp_path, capsys):
     assert payload["outputs"] == [str(output)]
 
 
+def test_generate_dry_run_prints_multiple_response_outputs(tmp_path, capsys):
+    output = tmp_path / "output" / "shield.png"
+
+    code = main(
+        [
+            "generate",
+            "--prompt",
+            "A bronze shield icon",
+            "--out",
+            str(output),
+            "--model",
+            "gpt-test",
+            "--n",
+            "3",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 0
+    assert payload["outputs"] == [
+        str(tmp_path / "output" / "shield-1.png"),
+        str(tmp_path / "output" / "shield-2.png"),
+        str(tmp_path / "output" / "shield-3.png"),
+    ]
+
+
+def test_edit_dry_run_redacts_response_input_images(tmp_path, capsys):
+    source = tmp_path / "source.png"
+    source.write_bytes(PNG_BYTES)
+    output = tmp_path / "output.png"
+
+    code = main(
+        [
+            "edit",
+            "--image",
+            str(source),
+            "--prompt",
+            "Make it blue",
+            "--out",
+            str(output),
+            "--model",
+            "gpt-test",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    content = payload["payload"]["input"][0]["content"]
+
+    assert code == 0
+    assert content[1]["image_url"] == "data:image/png;base64,<redacted>"
+
+
+def test_model_default_prefers_env_before_codex_config(tmp_path, monkeypatch, capsys):
+    codex_home = tmp_path / "codex-home"
+    codex_home.mkdir()
+    (codex_home / "config.toml").write_text('model = "gpt-config"\n', encoding="utf-8")
+    monkeypatch.setenv("CODEX_IMAGEGEN_MODEL", "gpt-env")
+    output = tmp_path / "output.png"
+
+    code = main(
+        [
+            "generate",
+            "--prompt",
+            "A bronze shield icon",
+            "--out",
+            str(output),
+            "--codex-home",
+            str(codex_home),
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 0
+    assert payload["payload"]["model"] == "gpt-env"
+
+
 def test_generate_writes_backend_image(tmp_path, monkeypatch):
     auth_file = _auth_file(tmp_path)
     output = tmp_path / "mug.png"

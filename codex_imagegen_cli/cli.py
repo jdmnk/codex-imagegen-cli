@@ -422,7 +422,10 @@ def _default_model(args: argparse.Namespace) -> str:
         return env_model
     config_file = _codex_config_file(args)
     if config_file.exists():
-        match = re.search(r'(?m)^model\s*=\s*"([^"]+)"', config_file.read_text(encoding="utf-8"))
+        match = re.search(
+            r"""(?m)^model\s*=\s*["']([^"']+)["']""",
+            config_file.read_text(encoding="utf-8"),
+        )
         if match:
             return match.group(1)
     return DEFAULT_CODEX_MODEL
@@ -555,27 +558,27 @@ def _dry_run_payload(
     headers: Optional[dict[str, str]],
     payload: dict[str, Any],
     output_path: Path,
+    output_count: Optional[int] = None,
 ) -> dict[str, Any]:
+    count = output_count if output_count is not None else int(payload.get("n", 1))
     return {
         "method": "POST",
         "url": url,
         "headers": _redacted_headers(headers or {"Authorization": "Bearer <redacted>"}),
         "payload": _redact_large_images(payload),
-        "outputs": [str(path) for path in _output_paths(output_path, int(payload.get("n", 1)))],
+        "outputs": [str(path) for path in _output_paths(output_path, count)],
     }
 
 
-def _redact_large_images(payload: dict[str, Any]) -> dict[str, Any]:
-    copied = dict(payload)
-    images = copied.get("images")
-    if isinstance(images, list):
-        copied["images"] = [
-            {"image_url": _redact_data_url(item.get("image_url"))}
-            if isinstance(item, dict)
-            else item
-            for item in images
-        ]
-    return copied
+def _redact_large_images(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: _redact_data_url(item) if key == "image_url" else _redact_large_images(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_redact_large_images(item) for item in value]
+    return value
 
 
 def _redact_data_url(value: Any) -> Any:
@@ -623,7 +626,18 @@ def _call_responses_backend(
     payload = _responses_payload(prompt=prompt, args=args, mode=mode, images=image_paths)
     output_paths = _output_paths(output_path, args.n)
     if args.dry_run:
-        print(json.dumps(_dry_run_payload(url=url, headers=None, payload=payload, output_path=output_path), indent=2))
+        print(
+            json.dumps(
+                _dry_run_payload(
+                    url=url,
+                    headers=None,
+                    payload=payload,
+                    output_path=output_path,
+                    output_count=args.n,
+                ),
+                indent=2,
+            )
+        )
         return output_paths
 
     auth, auth_file = _load_ready_auth(args)
@@ -741,7 +755,10 @@ def _add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--codex-home", help="Codex home directory. Defaults to $CODEX_HOME or ~/.codex.")
     parser.add_argument(
         "--model",
-        help="Codex reasoning model. Defaults to Codex config.",
+        help=(
+            "Codex reasoning model. Defaults to CODEX_IMAGEGEN_MODEL, "
+            "then Codex config, then the built-in fallback."
+        ),
     )
     parser.add_argument(
         "--backend",
