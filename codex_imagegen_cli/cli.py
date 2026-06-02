@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from typing import Any, List, Optional, Sequence, Tuple
 from urllib import error, request
 
@@ -45,6 +46,10 @@ def _die(message: str, code: int = 1) -> None:
 
 def _warn(message: str) -> None:
     print(f"Warning: {message}", file=sys.stderr)
+
+
+def _log(message: str) -> None:
+    print(message, file=sys.stderr)
 
 
 def _read_prompt(prompt: Optional[str], prompt_file: Optional[str], cd: Path) -> str:
@@ -647,6 +652,7 @@ def _call_responses_backend(
         current_payload = dict(payload)
         if args.n > 1:
             current_payload["prompt_cache_key"] = f"codex-imagegen-cli-{idx}"
+            _log(f"  image {idx}/{args.n} ...")
         try:
             encoded = _stream_image_result(url, headers=headers, payload=current_payload, timeout=args.timeout)
         except HttpError as exc:
@@ -733,10 +739,18 @@ def _run_one(
     prompt: str,
     output_path: Path,
     image_paths: Optional[Sequence[Path]] = None,
+    log_prefix: str = "",
 ) -> bool:
     if not args.dry_run:
         for path in _output_paths(output_path, args.n):
             _check_output(path, args.force)
+
+    if not args.dry_run:
+        count = f"{args.n}× " if args.n > 1 else ""
+        prefix = f"{log_prefix} " if log_prefix else ""
+        _log(f"{prefix}{mode} {count}{output_path}")
+        t0 = time.monotonic()
+
     paths = _call_image_backend(
         args=args,
         mode=mode,
@@ -744,7 +758,10 @@ def _run_one(
         output_path=output_path,
         image_paths=image_paths,
     )
+
     if not args.dry_run:
+        elapsed = time.monotonic() - t0
+        _log(f"  done ({elapsed:.1f}s)")
         _print_saved(paths)
     return True
 
@@ -855,7 +872,6 @@ def _cmd_batch(args: argparse.Namespace) -> int:
             raise CliError(f"Job {idx} has invalid mode: {mode}")
         if mode == "edit" and not images:
             raise CliError(f"Job {idx} mode is edit but images is empty.")
-        print(f"[{idx}/{len(jobs)}] {output_path}", file=sys.stderr)
         try:
             _run_one(
                 args=args,
@@ -863,10 +879,11 @@ def _cmd_batch(args: argparse.Namespace) -> int:
                 prompt=prompt,
                 output_path=output_path,
                 image_paths=images,
+                log_prefix=f"[{idx}/{len(jobs)}]",
             )
         except CliError as exc:
             failures += 1
-            _warn(f"Job {idx} failed: {exc}")
+            _warn(f"[{idx}/{len(jobs)}] failed: {exc}")
             if args.fail_fast:
                 break
     return 1 if failures else 0
