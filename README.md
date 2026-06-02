@@ -1,10 +1,27 @@
-# codex-imagegen-cli
+<div align="center">
 
-Image generation CLI using Codex's integrated image gen abilities. The CLI uses your existing Codex ChatGPT login and does not require an OpenAI API key.
+# 🎨 codex-imagegen-cli
+
+**Generate and edit images from your terminal using [Codex](https://github.com/openai/codex)'s built-in image tools — no API key needed.**
+
+Codex (OpenAI's CLI coding agent) has image generation capabilities built in. This CLI exposes them as a standalone scriptable tool, reusing your existing Codex ChatGPT login. Supports `generate`, `edit`, and `batch` modes out of the box.
+
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue?logo=python&logoColor=white)](https://www.python.org/)
+[![License](https://img.shields.io/badge/license-Apache%202.0-green)](LICENSE)
+[![Status](https://img.shields.io/badge/status-alpha-orange)](CHANGELOG.md)
+[![uv](https://img.shields.io/badge/uv-ready-purple?logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PHBhdGggZmlsbD0id2hpdGUiIGQ9Ik0xMiAyQzYuNDggMiAyIDYuNDggMiAxMnM0LjQ4IDEwIDEwIDEwIDEwLTQuNDggMTAtMTBTMTcuNTIgMiAxMiAyem0tMSAxNHYtNEg3bDUtOHY0aDRsLTUgOHoiLz48L3N2Zz4=)](https://github.com/astral-sh/uv)
+
+</div>
+
+---
 
 ```text
-$ codex-imagegen generate --prompt "A 32x32 retro RPG pixel icon of an iron helmet, no text" --out output/icons/iron-helmet.png --dry-run
+$ codex-imagegen generate \
+    --prompt "A 32x32 retro RPG pixel icon of an iron helmet, no text" \
+    --out output/icons/iron-helmet.png
 ```
+
+> Uses your existing **Codex ChatGPT login** — no `OPENAI_API_KEY` required.
 
 ## Requirements
 
