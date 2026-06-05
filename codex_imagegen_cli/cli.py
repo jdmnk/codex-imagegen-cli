@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 from urllib import error, request
 
@@ -22,10 +23,12 @@ from codex_imagegen_cli import __version__
 DEFAULT_BASE_URL = "https://chatgpt.com/backend-api/codex"
 DEFAULT_REFRESH_URL = "https://auth.openai.com/oauth/token"
 CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
-DEFAULT_IMAGE_MODEL = "gpt-image-2"
 DEFAULT_CODEX_MODEL = "gpt-5.5"
 MAX_EDIT_IMAGES = 5
 DEFAULT_ORIGINATOR = "codex_cli_rs"
+IMAGE_SIZE_CHOICES = ("auto", "1024x1024", "1536x1024", "1024x1536")
+MAX_RESPONSES_IMAGE_RETRIES = 4
+INPUT_IMAGE_RATE_LIMIT_DELAYS = (65.0, 130.0, 260.0, 300.0)
 
 
 class CliError(Exception):
@@ -37,6 +40,26 @@ class HttpError(CliError):
         super().__init__(f"HTTP {status}: {body[:800]}")
         self.status = status
         self.body = body
+
+
+class ResponsesImageGenerationError(CliError):
+    def __init__(self, event: dict[str, Any]) -> None:
+        self.event = event
+        error_obj = _responses_image_error(event)
+        code = error_obj.get("code") if error_obj else None
+        message = error_obj.get("message") if error_obj else None
+        if isinstance(code, str) and isinstance(message, str):
+            super().__init__(f"Responses image generation failed ({code}): {message}")
+        elif isinstance(message, str):
+            super().__init__(f"Responses image generation failed: {message}")
+        else:
+            super().__init__(f"Responses image generation failed: {event}")
+
+
+@dataclass(frozen=True)
+class RetryDecision:
+    delay: float
+    reason: str
 
 
 def _die(message: str, code: int = 1) -> None:
@@ -436,21 +459,6 @@ def _default_model(args: argparse.Namespace) -> str:
     return DEFAULT_CODEX_MODEL
 
 
-def _prompt_with_controls(prompt: str, args: argparse.Namespace) -> str:
-    controls = []
-    if args.size != "auto":
-        controls.append(f"Requested image size: {args.size}.")
-    if args.quality != "auto":
-        controls.append(f"Requested quality: {args.quality}.")
-    if args.background != "auto":
-        controls.append(f"Requested background: {args.background}.")
-    if args.image_model != DEFAULT_IMAGE_MODEL:
-        controls.append(f"Requested image model preference: {args.image_model}.")
-    if not controls:
-        return prompt
-    return "\n\n".join([prompt, "Additional image constraints:\n" + "\n".join(controls)])
-
-
 def _responses_payload(
     *,
     prompt: str,
@@ -458,12 +466,19 @@ def _responses_payload(
     mode: str,
     images: Optional[Sequence[Path]] = None,
 ) -> dict[str, Any]:
-    content: List[dict[str, Any]] = [{"type": "input_text", "text": _prompt_with_controls(prompt, args)}]
+    content: List[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
     if images:
         if len(images) > MAX_EDIT_IMAGES:
             raise CliError(f"Edit supports at most {MAX_EDIT_IMAGES} images.")
         for image in images:
             content.append({"type": "input_image", "image_url": _data_url_for_image(image)})
+    image_tool = {
+        "type": "image_generation",
+        "output_format": "png",
+        "size": args.size,
+        "quality": args.quality,
+        "background": args.background,
+    }
     instructions = (
         "Use the available image generation tool to generate exactly one PNG image for the user request. "
         "Do not use any other tool."
@@ -474,8 +489,8 @@ def _responses_payload(
         "model": _default_model(args),
         "instructions": instructions,
         "input": [{"type": "message", "role": "user", "content": content}],
-        "tools": [{"type": "image_generation", "output_format": "png"}],
-        "tool_choice": "auto",
+        "tools": [image_tool],
+        "tool_choice": {"type": "image_generation"},
         "parallel_tool_calls": False,
         "reasoning": None,
         "store": False,
@@ -486,50 +501,8 @@ def _responses_payload(
     }
 
 
-def _image_payload(
-    *,
-    prompt: str,
-    args: argparse.Namespace,
-    images: Optional[Sequence[Path]] = None,
-) -> dict[str, Any]:
-    payload: dict[str, Any] = {
-        "prompt": prompt,
-        "background": args.background,
-        "model": args.image_model,
-        "quality": args.quality,
-        "size": args.size,
-    }
-    if args.n != 1:
-        payload["n"] = args.n
-    if images is not None:
-        if len(images) > MAX_EDIT_IMAGES:
-            raise CliError(f"Edit supports at most {MAX_EDIT_IMAGES} images.")
-        payload["images"] = [{"image_url": _data_url_for_image(path)} for path in images]
-    return payload
-
-
 def _endpoint(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
-
-
-def _decode_outputs(response: dict[str, Any], output_path: Path, *, force: bool) -> List[Path]:
-    data = response.get("data")
-    if not isinstance(data, list) or not data:
-        raise CliError("Image response did not contain any data.")
-    paths = _output_paths(output_path, len(data))
-    for item, path in zip(data, paths):
-        if not isinstance(item, dict):
-            raise CliError("Image response item was not an object.")
-        encoded = item.get("b64_json")
-        if not isinstance(encoded, str) or not encoded:
-            raise CliError("Image response item did not contain b64_json.")
-        _check_output(path, force)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            path.write_bytes(base64.b64decode(encoded))
-        except ValueError as exc:
-            raise CliError("Image response b64_json was not valid base64.") from exc
-    return paths
 
 
 def _write_response_image(encoded: str, output_path: Path, *, force: bool) -> Path:
@@ -593,32 +566,6 @@ def _redact_data_url(value: Any) -> Any:
     return f"{prefix};base64,<redacted>"
 
 
-def _call_direct_image_backend(
-    *,
-    args: argparse.Namespace,
-    mode: str,
-    payload: dict[str, Any],
-    output_path: Path,
-) -> List[Path]:
-    path = "images/generations" if mode == "generate" else "images/edits"
-    url = _endpoint(args.base_url, path)
-    if args.dry_run:
-        print(json.dumps(_dry_run_payload(url=url, headers=None, payload=payload, output_path=output_path), indent=2))
-        return _output_paths(output_path, int(payload.get("n", 1)))
-
-    auth, auth_file = _load_ready_auth(args)
-    headers = _auth_headers(auth)
-    try:
-        response = _post_json(url, headers=headers, payload=payload, timeout=args.timeout)
-    except HttpError as exc:
-        if exc.status != 401:
-            raise
-        auth = _refresh_auth(auth, auth_file, timeout=args.timeout)
-        headers = _auth_headers(auth)
-        response = _post_json(url, headers=headers, payload=payload, timeout=args.timeout)
-    return _decode_outputs(response, output_path, force=args.force)
-
-
 def _call_responses_backend(
     *,
     args: argparse.Namespace,
@@ -653,16 +600,80 @@ def _call_responses_backend(
         if args.n > 1:
             current_payload["prompt_cache_key"] = f"codex-imagegen-cli-{idx}"
             _log(f"  image {idx}/{args.n} ...")
-        try:
-            encoded = _stream_image_result(url, headers=headers, payload=current_payload, timeout=args.timeout)
-        except HttpError as exc:
-            if exc.status != 401:
-                raise
-            auth = _refresh_auth(auth, auth_file, timeout=args.timeout)
-            headers = _auth_headers(auth)
-            encoded = _stream_image_result(url, headers=headers, payload=current_payload, timeout=args.timeout)
+        attempt = 0
+        while True:
+            try:
+                encoded = _stream_image_result(
+                    url,
+                    headers=headers,
+                    payload=current_payload,
+                    timeout=args.timeout,
+                )
+                break
+            except HttpError as exc:
+                if exc.status != 401:
+                    raise
+                auth = _refresh_auth(auth, auth_file, timeout=args.timeout)
+                headers = _auth_headers(auth)
+                encoded = _stream_image_result(
+                    url,
+                    headers=headers,
+                    payload=current_payload,
+                    timeout=args.timeout,
+                )
+                break
+            except ResponsesImageGenerationError as exc:
+                retry = _responses_image_retry_decision(exc.event, attempt)
+                if retry is None or attempt >= MAX_RESPONSES_IMAGE_RETRIES:
+                    raise
+                attempt += 1
+                _warn(
+                    f"{retry.reason}; "
+                    f"retrying in {retry.delay:.1f}s ({attempt}/{MAX_RESPONSES_IMAGE_RETRIES})"
+                )
+                time.sleep(retry.delay)
         saved.append(_write_response_image(encoded, path, force=args.force))
     return saved
+
+
+def _responses_image_retry_delay(event: dict[str, Any], attempt: int) -> Optional[float]:
+    decision = _responses_image_retry_decision(event, attempt)
+    return decision.delay if decision is not None else None
+
+
+def _responses_image_retry_decision(event: dict[str, Any], attempt: int) -> Optional[RetryDecision]:
+    error_obj = _responses_image_error(event)
+    if not isinstance(error_obj, dict) or error_obj.get("code") != "rate_limit_exceeded":
+        return None
+    message = error_obj.get("message")
+    parsed_delay = None
+    if isinstance(message, str):
+        if "input-images per min" in message and _rate_limit_bucket_exhausted(message):
+            delay = INPUT_IMAGE_RATE_LIMIT_DELAYS[min(attempt, len(INPUT_IMAGE_RATE_LIMIT_DELAYS) - 1)]
+            return RetryDecision(delay, "input-image quota full")
+        match = re.search(r"try again in\s+(\d+(?:\.\d+)?)\s*(ms|s)", message, re.IGNORECASE)
+        if match:
+            parsed_delay = float(match.group(1))
+            if match.group(2).lower() == "ms":
+                parsed_delay /= 1000.0
+    backoff_delay = min(2.0**attempt, 16.0)
+    if parsed_delay is None:
+        return RetryDecision(backoff_delay, "image generation rate-limited")
+    return RetryDecision(max(parsed_delay, backoff_delay), "image generation rate-limited")
+
+
+def _responses_image_error(event: dict[str, Any]) -> Optional[dict[str, Any]]:
+    response = event.get("response")
+    error_obj = response.get("error") if isinstance(response, dict) else None
+    return error_obj if isinstance(error_obj, dict) else None
+
+
+def _rate_limit_bucket_exhausted(message: str) -> bool:
+    used_match = re.search(r"Used\s+(\d+(?:\.\d+)?)", message)
+    limit_match = re.search(r"Limit\s+(\d+(?:\.\d+)?)", message)
+    if not used_match or not limit_match:
+        return False
+    return float(used_match.group(1)) >= float(limit_match.group(1))
 
 
 def _stream_image_result(
@@ -692,7 +703,7 @@ def _stream_image_result(
             if isinstance(result, str) and result:
                 return result
     if last_error is not None:
-        raise CliError(f"Responses image generation failed: {last_error}")
+        raise ResponsesImageGenerationError(last_error)
     if last_status:
         raise CliError(f"Responses stream ended without an image result; last status was {last_status}.")
     raise CliError("Responses stream ended without an image generation result.")
@@ -706,18 +717,6 @@ def _call_image_backend(
     output_path: Path,
     image_paths: Optional[Sequence[Path]] = None,
 ) -> List[Path]:
-    if args.backend == "direct":
-        payload = _image_payload(
-            prompt=prompt,
-            args=args,
-            images=image_paths if mode == "edit" else None,
-        )
-        return _call_direct_image_backend(
-            args=args,
-            mode=mode,
-            payload=payload,
-            output_path=output_path,
-        )
     return _call_responses_backend(
         args=args,
         mode=mode,
@@ -773,15 +772,9 @@ def _add_auth_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--model",
         help=(
-            "Codex reasoning model. Defaults to CODEX_IMAGEGEN_MODEL, "
+            "Codex reasoning model for the direct hosted image tool. Defaults to CODEX_IMAGEGEN_MODEL, "
             "then Codex config, then the built-in fallback."
         ),
-    )
-    parser.add_argument(
-        "--backend",
-        choices=["responses", "direct"],
-        default="responses",
-        help="Backend path to use. Default is the stable responses path.",
     )
     parser.add_argument(
         "--base-url",
@@ -794,26 +787,22 @@ def _add_auth_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_image_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
-        "--image-model",
-        default=DEFAULT_IMAGE_MODEL,
-        help="Image model preference. Exact model control is only available with --backend direct.",
-    )
-    parser.add_argument(
         "--background",
         choices=["auto", "transparent", "opaque"],
         default="auto",
-        help="Background preference. Exact control is only available with --backend direct.",
+        help="Direct background parameter.",
     )
     parser.add_argument(
         "--quality",
         choices=["auto", "low", "medium", "high"],
         default="auto",
-        help="Quality preference. Exact control is only available with --backend direct.",
+        help="Direct quality parameter.",
     )
     parser.add_argument(
         "--size",
+        choices=IMAGE_SIZE_CHOICES,
         default="auto",
-        help='Size preference, for example "auto" or "1024x1024". Exact control is only available with --backend direct.',
+        help="Direct size parameter. Choices: auto, 1024x1024, 1536x1024, 1024x1536.",
     )
     parser.add_argument("--n", type=int, default=1, help="Number of images to request.")
 

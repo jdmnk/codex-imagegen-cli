@@ -40,6 +40,51 @@ def _auth_file(tmp_path, access_token: str = "token"):
     return path
 
 
+def _sse_image_result():
+    yield (
+        "response.output_item.done",
+        json.dumps(
+            {
+                "type": "response.output_item.done",
+                "item": {
+                    "type": "image_generation_call",
+                    "status": "completed",
+                    "result": base64.b64encode(PNG_BYTES).decode("ascii"),
+                },
+            }
+        ),
+    )
+
+
+def _sse_rate_limit_result():
+    yield (
+        "response.failed",
+        json.dumps(
+            {
+                "type": "response.failed",
+                "response": {
+                    "error": {
+                        "code": "rate_limit_exceeded",
+                        "message": "Rate limit reached. Please try again in 15ms.",
+                    }
+                },
+            }
+        ),
+    )
+
+
+def _rate_limit_event(message: str):
+    return {
+        "type": "response.failed",
+        "response": {
+            "error": {
+                "code": "rate_limit_exceeded",
+                "message": message,
+            }
+        },
+    }
+
+
 def test_generate_dry_run_prints_codex_request(tmp_path, capsys):
     output = tmp_path / "output" / "mug.png"
 
@@ -50,8 +95,12 @@ def test_generate_dry_run_prints_codex_request(tmp_path, capsys):
             "A studio photo of a mug",
             "--out",
             str(output),
-            "--model",
-            "gpt-test",
+            "--size",
+            "1536x1024",
+            "--quality",
+            "high",
+            "--background",
+            "opaque",
             "--dry-run",
         ]
     )
@@ -63,13 +112,21 @@ def test_generate_dry_run_prints_codex_request(tmp_path, capsys):
     assert payload["method"] == "POST"
     assert payload["url"] == "https://chatgpt.com/backend-api/codex/responses"
     assert payload["headers"]["Authorization"] == "Bearer <redacted>"
-    assert payload["payload"]["model"] == "gpt-test"
-    assert payload["payload"]["tools"] == [{"type": "image_generation", "output_format": "png"}]
     assert payload["payload"]["input"][0]["content"][0]["text"] == "A studio photo of a mug"
+    assert payload["payload"]["tools"] == [
+        {
+            "type": "image_generation",
+            "output_format": "png",
+            "size": "1536x1024",
+            "quality": "high",
+            "background": "opaque",
+        }
+    ]
+    assert payload["payload"]["tool_choice"] == {"type": "image_generation"}
     assert payload["outputs"] == [str(output)]
 
 
-def test_generate_dry_run_prints_multiple_response_outputs(tmp_path, capsys):
+def test_generate_dry_run_prints_multiple_direct_outputs(tmp_path, capsys):
     output = tmp_path / "output" / "shield.png"
 
     code = main(
@@ -98,7 +155,7 @@ def test_generate_dry_run_prints_multiple_response_outputs(tmp_path, capsys):
     ]
 
 
-def test_edit_dry_run_redacts_response_input_images(tmp_path, capsys):
+def test_edit_dry_run_redacts_direct_input_images(tmp_path, capsys):
     source = tmp_path / "source.png"
     source.write_bytes(PNG_BYTES)
     output = tmp_path / "output.png"
@@ -120,10 +177,11 @@ def test_edit_dry_run_redacts_response_input_images(tmp_path, capsys):
 
     captured = capsys.readouterr()
     payload = json.loads(captured.out)
-    content = payload["payload"]["input"][0]["content"]
 
     assert code == 0
-    assert content[1]["image_url"] == "data:image/png;base64,<redacted>"
+    assert payload["url"] == "https://chatgpt.com/backend-api/codex/responses"
+    assert payload["payload"]["input"][0]["content"][1]["image_url"] == "data:image/png;base64,<redacted>"
+    assert payload["payload"]["tools"][0]["background"] == "auto"
 
 
 def test_model_default_prefers_env_before_codex_config(tmp_path, monkeypatch, capsys):
@@ -160,19 +218,7 @@ def test_generate_writes_backend_image(tmp_path, monkeypatch):
 
     def fake_post_sse(url, *, headers, payload, timeout):
         calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
-        yield (
-            "response.output_item.done",
-            json.dumps(
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "image_generation_call",
-                        "status": "completed",
-                        "result": base64.b64encode(PNG_BYTES).decode("ascii"),
-                    },
-                }
-            ),
-        )
+        yield from _sse_image_result()
 
     monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
 
@@ -197,6 +243,83 @@ def test_generate_writes_backend_image(tmp_path, monkeypatch):
     assert calls[0]["headers"]["ChatGPT-Account-ID"] == "acct_123"
     assert calls[0]["headers"]["originator"] == "codex_cli_rs"
     assert calls[0]["payload"]["input"][0]["content"][0]["text"] == "A studio photo of a mug"
+    assert calls[0]["payload"]["tools"][0] == {
+        "type": "image_generation",
+        "output_format": "png",
+        "size": "auto",
+        "quality": "auto",
+        "background": "auto",
+    }
+
+
+def test_direct_backend_retries_streamed_rate_limit(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    output = tmp_path / "mug.png"
+    calls = []
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        calls.append({"url": url, "headers": headers, "payload": payload, "timeout": timeout})
+        if len(calls) == 1:
+            yield from _sse_rate_limit_result()
+        else:
+            yield from _sse_image_result()
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+    monkeypatch.setattr(cli.time, "sleep", lambda _delay: None)
+
+    code = main(
+        [
+            "generate",
+            "--prompt",
+            "A studio photo of a mug",
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+            "--model",
+            "gpt-test",
+        ]
+    )
+
+    assert code == 0
+    assert output.read_bytes() == PNG_BYTES
+    assert len(calls) == 2
+
+
+def test_input_image_rate_limit_waits_for_minute_window():
+    event = _rate_limit_event(
+        "Rate limit reached for gpt-image-2-codex (for limit gpt-image) "
+        "in organization org on input-images per min: Limit 4000, Used 4000, Requested 1. "
+        "Please try again in 15ms."
+    )
+
+    assert cli._responses_image_retry_delay(event, attempt=0) == 65.0
+    assert cli._responses_image_retry_delay(event, attempt=1) == 130.0
+    assert cli._responses_image_retry_delay(event, attempt=2) == 260.0
+    assert cli._responses_image_retry_delay(event, attempt=3) == 300.0
+
+
+def test_input_image_rate_limit_retry_reason_is_specific():
+    event = _rate_limit_event(
+        "Rate limit reached for gpt-image-2-codex (for limit gpt-image) "
+        "in organization org on input-images per min: Limit 4000, Used 4000, Requested 1. "
+        "Please try again in 15ms."
+    )
+
+    decision = cli._responses_image_retry_decision(event, attempt=0)
+
+    assert decision == cli.RetryDecision(65.0, "input-image quota full")
+
+
+def test_streamed_image_failure_message_is_concise():
+    event = _rate_limit_event("Rate limit reached. Please try again later.")
+
+    err = cli.ResponsesImageGenerationError(event)
+
+    assert str(err) == (
+        "Responses image generation failed (rate_limit_exceeded): "
+        "Rate limit reached. Please try again later."
+    )
 
 
 def test_edit_encodes_input_image(tmp_path, monkeypatch):
@@ -209,19 +332,7 @@ def test_edit_encodes_input_image(tmp_path, monkeypatch):
     def fake_post_sse(url, *, headers, payload, timeout):
         seen["url"] = url
         seen["payload"] = payload
-        yield (
-            "response.output_item.done",
-            json.dumps(
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "image_generation_call",
-                        "status": "completed",
-                        "result": base64.b64encode(PNG_BYTES).decode("ascii"),
-                    },
-                }
-            ),
-        )
+        yield from _sse_image_result()
 
     monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
 
@@ -244,6 +355,7 @@ def test_edit_encodes_input_image(tmp_path, monkeypatch):
     assert code == 0
     assert seen["url"].endswith("/responses")
     assert seen["payload"]["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,")
+    assert seen["payload"]["tools"][0]["type"] == "image_generation"
     assert output.read_bytes() == PNG_BYTES
 
 
@@ -257,22 +369,11 @@ def test_expired_token_is_refreshed(tmp_path, monkeypatch):
     def fake_post_json(url, *, headers=None, payload, timeout):
         if url == cli.DEFAULT_REFRESH_URL:
             return {"access_token": fresh, "refresh_token": "refresh2"}
+        raise AssertionError("image generation should use streamed responses")
 
     def fake_post_sse(url, *, headers, payload, timeout):
         auth_headers.append(headers["Authorization"])
-        yield (
-            "response.output_item.done",
-            json.dumps(
-                {
-                    "type": "response.output_item.done",
-                    "item": {
-                        "type": "image_generation_call",
-                        "status": "completed",
-                        "result": base64.b64encode(PNG_BYTES).decode("ascii"),
-                    },
-                }
-            ),
-        )
+        yield from _sse_image_result()
 
     monkeypatch.setattr(cli, "_post_json", fake_post_json)
     monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
@@ -321,6 +422,24 @@ def test_batch_accepts_jsonl_string_jobs(tmp_path, capsys):
     assert code == 0
     assert payload["payload"]["input"][0]["content"][0]["text"] == "A compact shuttle parked in a hangar"
     assert payload["outputs"][0].endswith("001-a-compact-shuttle-parked-in-a-hangar.png")
+
+
+def test_size_rejects_unknown_value(tmp_path):
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--prompt",
+                "A mug",
+                "--out",
+                str(tmp_path / "mug.png"),
+                "--size",
+                "2048x2048",
+                "--dry-run",
+            ]
+        )
+
+    assert exc.value.code == 2
 
 
 def test_version_flag(capsys):

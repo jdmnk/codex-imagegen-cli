@@ -27,7 +27,7 @@ Uses your existing **Codex ChatGPT login** — no `OPENAI_API_KEY` required.
 
 [Codex](https://github.com/openai/codex) (OpenAI's CLI coding agent) has image generation built in — but it's prompt-driven and agentic, not a scriptable command. There is no `codex image generate` subcommand, no `--size` or `--quality` flags, and the documented automation primitive (`codex exec`) emits assistant text, not image bytes.
 
-This CLI fills that gap by calling Codex's backend directly, using your existing ChatGPT subscription auth. No `OPENAI_API_KEY` neede, as it's not API billing — just the same image generation Codex uses internally, exposed as a proper scriptable tool with explicit control over **model**, **size**, **quality**, **background**, and **output** for `generate`, `edit`, and `batch` workflows.
+This CLI fills that gap by calling Codex's backend directly, using your existing ChatGPT subscription auth. No `OPENAI_API_KEY` needed, as it's not API billing - just the same image generation Codex uses internally, exposed as a scriptable tool for `generate`, `edit`, and `batch` workflows with clear options for **model**, **size**, **quality**, **background**, and **output**.
 
 ## Requirements
 
@@ -136,15 +136,66 @@ Each line can be either a JSON string prompt or an object with:
 - `--cd PATH`: base directory for resolving relative paths
 - `--auth-file PATH`: read a specific Codex `auth.json`
 - `--codex-home PATH`: read auth from another Codex home directory
-- `--model MODEL`: override the Codex reasoning model used to run the Codex turn. This is separate from `--image-model`.
+- `--model MODEL`: override the Codex reasoning model used by the direct hosted image tool.
 - `--base-url URL`: override the Codex backend URL for development
-- `--backend responses|direct`: choose the Codex request path; keep the default unless debugging compatibility
-- `--image-model MODEL`: image model preference; with the default backend this is added to the prompt as guidance
-- `--background auto|transparent|opaque`: background preference; with the default backend this is added to the prompt as guidance
-- `--quality auto|low|medium|high`: quality preference; with the default backend this is added to the prompt as guidance
-- `--size auto|1024x1024`: size preference; with the default backend this is added to the prompt as guidance
-- `--n COUNT`: request multiple output images; the stable backend runs one streamed response per image
+- `--background auto|transparent|opaque`: direct `background` parameter.
+- `--quality auto|low|medium|high`: direct `quality` parameter.
+- `--size auto|1024x1024|1536x1024|1024x1536`: direct `size` parameter.
+- `--n COUNT`: request multiple output images. The CLI runs one hosted image request per output.
 - `--dry-run`: print the request shape without reading auth or contacting the backend
+
+## Backend Path
+
+The CLI calls Codex directly through the enabled hosted image-generation path:
+
+`POST https://chatgpt.com/backend-api/codex/responses`
+
+The request forces the hosted `image_generation` tool and sends exact image options as tool parameters:
+
+```json
+{
+  "model": "gpt-5.5",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{"type": "input_text", "text": "A studio photo of a mug"}]
+    }
+  ],
+  "tools": [
+    {
+      "type": "image_generation",
+      "output_format": "png",
+      "size": "1536x1024",
+      "quality": "high",
+      "background": "opaque"
+    }
+  ],
+  "tool_choice": {"type": "image_generation"},
+  "stream": true
+}
+```
+
+Edit requests add input images to the user message:
+
+```json
+{
+  "content": [
+    {"type": "input_text", "text": "Make it blue"},
+    {"type": "input_image", "image_url": "data:image/png;base64,..."}
+  ],
+  "tools": [{"type": "image_generation"}]
+}
+```
+
+The accepted image preference values are:
+
+- `size`: `auto`, `1024x1024` square, `1536x1024` landscape, or `1024x1536` portrait
+- `quality`: `auto`, `low`, `medium`, or `high`
+- `background`: `auto`, `transparent`, or `opaque`
+
+`n` is handled by the CLI by running one hosted image request per output path.
+For edit jobs, repeated outputs may wait for the per-minute input-image quota window before retrying; if the bucket stays full, retries back off progressively.
 
 ## How It Works
 
@@ -152,8 +203,8 @@ Each line can be either a JSON string prompt or an object with:
 
 - reads Codex auth from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
 - refreshes the ChatGPT access token when needed
-- sends a Codex image-generation turn with your prompt and optional input images
-- streams the result and writes the final PNG to `--out`
+- sends a direct Codex `/responses` request with an exact hosted `image_generation` tool by default
+- streams the `image_generation_call.result` bytes and writes the PNG to `--out`
 
 Dry runs only print the planned request and output paths; they do not read auth or contact Codex.
 
@@ -164,7 +215,7 @@ This project relies on Codex's current authenticated app behavior, not a public 
 A few things worth knowing:
 
 - **Subscription only.** The built-in Codex image generation path is gated to ChatGPT auth (Plus, Pro, Business, Edu, Enterprise). It is not available on the Free plan and does not work with an `OPENAI_API_KEY` session — that key routes to the Images API instead, under separate billing.
-- **Usage limits apply.** Image generations consume your Codex account's included limits, roughly 3–5× faster than a comparable non-image turn. OpenAI documents approximate credit costs per image size (e.g. ~5–6 credits for 1024×1024).
+- **Usage limits apply.** Image generations consume your Codex account's included limits, roughly 3–5× faster than a comparable non-image turn. Edit jobs also consume an input-image quota; if that per-minute bucket is full, the CLI waits and retries.
 - **No stable API contract.** Codex internals and account policies can change. The CLI may stop working or behave differently after a Codex update, and OpenAI has not documented this as a supported automation surface.
 
 We will try to keep this project updated as long as this usage remains possible and allowed.
