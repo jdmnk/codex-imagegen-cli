@@ -94,6 +94,15 @@ codex-imagegen generate \
 
 Multiple outputs are written as `bronze-shield-1.png`, `bronze-shield-2.png`, and so on.
 
+Write WebP directly by using a `.webp` output path:
+
+```bash
+codex-imagegen generate \
+  --prompt "A 32x32 retro RPG pixel icon of a bronze shield with a red gem, no text" \
+  --out output/icons/bronze-shield.webp \
+  --webp-quality 82
+```
+
 ## Edit
 
 ```bash
@@ -141,6 +150,8 @@ Each line can be either a JSON string prompt or an object with:
 - `--background auto|transparent|opaque`: direct `background` parameter.
 - `--quality auto|low|medium|high`: direct `quality` parameter.
 - `--size auto|1024x1024|1536x1024|1024x1536`: direct `size` parameter.
+- `--output-format auto|png|webp`: output file format. Default: infer from `--out`; `.webp` writes WebP, everything else writes PNG.
+- `--webp-quality 1..100`: WebP encoder quality. Default: `85`.
 - `--n COUNT`: request multiple output images. The CLI runs one hosted image request per output.
 - `--dry-run`: print the request shape without reading auth or contacting the backend
 
@@ -196,6 +207,7 @@ The accepted image preference values are:
 
 `n` is handled by the CLI by running one hosted image request per output path.
 For edit jobs, repeated outputs may wait for the per-minute input-image quota window before retrying; if the bucket stays full, retries back off progressively.
+Codex returns PNG bytes; when the requested output is WebP, the CLI converts the PNG locally with Pillow.
 
 ## How It Works
 
@@ -204,7 +216,8 @@ For edit jobs, repeated outputs may wait for the per-minute input-image quota wi
 - reads Codex auth from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
 - refreshes the ChatGPT access token when needed
 - sends a direct Codex `/responses` request with an exact hosted `image_generation` tool by default
-- streams the `image_generation_call.result` bytes and writes the PNG to `--out`
+- streams the `image_generation_call.result` PNG bytes
+- writes PNG output directly, or converts locally to WebP when requested
 
 Dry runs only print the planned request and output paths; they do not read auth or contact Codex.
 

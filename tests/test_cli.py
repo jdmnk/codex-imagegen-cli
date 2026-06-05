@@ -11,6 +11,9 @@ from codex_imagegen_cli.cli import main
 
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n"
+VALID_PNG_BYTES = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
+)
 
 
 def _jwt(payload: dict[str, object]) -> str:
@@ -40,7 +43,7 @@ def _auth_file(tmp_path, access_token: str = "token"):
     return path
 
 
-def _sse_image_result():
+def _sse_image_result(image_bytes: bytes = PNG_BYTES):
     yield (
         "response.output_item.done",
         json.dumps(
@@ -49,7 +52,7 @@ def _sse_image_result():
                 "item": {
                     "type": "image_generation_call",
                     "status": "completed",
-                    "result": base64.b64encode(PNG_BYTES).decode("ascii"),
+                    "result": base64.b64encode(image_bytes).decode("ascii"),
                 },
             }
         ),
@@ -127,7 +130,7 @@ def test_generate_dry_run_prints_codex_request(tmp_path, capsys):
 
 
 def test_generate_dry_run_prints_multiple_direct_outputs(tmp_path, capsys):
-    output = tmp_path / "output" / "shield.png"
+    output = tmp_path / "output" / "shield.webp"
 
     code = main(
         [
@@ -149,9 +152,9 @@ def test_generate_dry_run_prints_multiple_direct_outputs(tmp_path, capsys):
 
     assert code == 0
     assert payload["outputs"] == [
-        str(tmp_path / "output" / "shield-1.png"),
-        str(tmp_path / "output" / "shield-2.png"),
-        str(tmp_path / "output" / "shield-3.png"),
+        str(tmp_path / "output" / "shield-1.webp"),
+        str(tmp_path / "output" / "shield-2.webp"),
+        str(tmp_path / "output" / "shield-3.webp"),
     ]
 
 
@@ -250,6 +253,64 @@ def test_generate_writes_backend_image(tmp_path, monkeypatch):
         "quality": "auto",
         "background": "auto",
     }
+
+
+def test_generate_converts_webp_output_from_file_extension(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    output = tmp_path / "mug.webp"
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        yield from _sse_image_result(VALID_PNG_BYTES)
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    code = main(
+        [
+            "generate",
+            "--prompt",
+            "A studio photo of a mug",
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+            "--webp-quality",
+            "72",
+        ]
+    )
+
+    data = output.read_bytes()
+    assert code == 0
+    assert data[:4] == b"RIFF"
+    assert data[8:12] == b"WEBP"
+
+
+def test_output_format_can_force_webp_with_png_extension(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    output = tmp_path / "mug.png"
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        yield from _sse_image_result(VALID_PNG_BYTES)
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    code = main(
+        [
+            "generate",
+            "--prompt",
+            "A studio photo of a mug",
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+            "--output-format",
+            "webp",
+        ]
+    )
+
+    data = output.read_bytes()
+    assert code == 0
+    assert data[:4] == b"RIFF"
+    assert data[8:12] == b"WEBP"
 
 
 def test_direct_backend_retries_streamed_rate_limit(tmp_path, monkeypatch):
@@ -440,6 +501,26 @@ def test_size_rejects_unknown_value(tmp_path):
         )
 
     assert exc.value.code == 2
+
+
+def test_webp_quality_rejects_out_of_range(tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--prompt",
+                "A mug",
+                "--out",
+                str(tmp_path / "mug.webp"),
+                "--webp-quality",
+                "101",
+                "--dry-run",
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 1
+    assert "--webp-quality must be between 1 and 100" in captured.err
 
 
 def test_version_flag(capsys):

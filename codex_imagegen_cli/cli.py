@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+from io import BytesIO
 from datetime import datetime, timezone
 import json
 import mimetypes
@@ -17,6 +18,8 @@ from dataclasses import dataclass
 from typing import Any, List, Optional, Sequence, Tuple
 from urllib import error, request
 
+from PIL import Image
+
 from codex_imagegen_cli import __version__
 
 
@@ -27,6 +30,7 @@ DEFAULT_CODEX_MODEL = "gpt-5.5"
 MAX_EDIT_IMAGES = 5
 DEFAULT_ORIGINATOR = "codex_cli_rs"
 IMAGE_SIZE_CHOICES = ("auto", "1024x1024", "1536x1024", "1024x1536")
+OUTPUT_FORMAT_CHOICES = ("auto", "png", "webp")
 MAX_RESPONSES_IMAGE_RETRIES = 4
 INPUT_IMAGE_RATE_LIMIT_DELAYS = (65.0, 130.0, 260.0, 300.0)
 
@@ -505,14 +509,52 @@ def _endpoint(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
 
-def _write_response_image(encoded: str, output_path: Path, *, force: bool) -> Path:
+def _write_response_image(
+    encoded: str,
+    output_path: Path,
+    *,
+    force: bool,
+    output_format: str,
+    webp_quality: int,
+) -> Path:
     _check_output(output_path, force)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        output_path.write_bytes(base64.b64decode(encoded))
+        image_bytes = base64.b64decode(encoded)
     except ValueError as exc:
         raise CliError("Image generation result was not valid base64.") from exc
+    _write_image_bytes(
+        image_bytes,
+        output_path,
+        output_format=output_format,
+        webp_quality=webp_quality,
+    )
     return output_path
+
+
+def _write_image_bytes(
+    image_bytes: bytes,
+    output_path: Path,
+    *,
+    output_format: str,
+    webp_quality: int,
+) -> None:
+    resolved_format = _resolve_output_format(output_path, output_format)
+    if resolved_format == "png":
+        output_path.write_bytes(image_bytes)
+        return
+
+    try:
+        with Image.open(BytesIO(image_bytes)) as image:
+            image.save(output_path, "WEBP", quality=webp_quality)
+    except Exception as exc:
+        raise CliError(f"Failed to convert image to WebP: {exc}") from exc
+
+
+def _resolve_output_format(output_path: Path, output_format: str) -> str:
+    if output_format != "auto":
+        return output_format
+    return "webp" if output_path.suffix.lower() == ".webp" else "png"
 
 
 def _output_paths(output_path: Path, count: int) -> List[Path]:
@@ -632,7 +674,15 @@ def _call_responses_backend(
                     f"retrying in {retry.delay:.1f}s ({attempt}/{MAX_RESPONSES_IMAGE_RETRIES})"
                 )
                 time.sleep(retry.delay)
-        saved.append(_write_response_image(encoded, path, force=args.force))
+        saved.append(
+            _write_response_image(
+                encoded,
+                path,
+                force=args.force,
+                output_format=args.output_format,
+                webp_quality=args.webp_quality,
+            )
+        )
     return saved
 
 
@@ -804,6 +854,18 @@ def _add_image_args(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="Direct size parameter. Choices: auto, 1024x1024, 1536x1024, 1024x1536.",
     )
+    parser.add_argument(
+        "--output-format",
+        choices=OUTPUT_FORMAT_CHOICES,
+        default="auto",
+        help="Output file format. Default: auto from --out extension (.webp writes WebP, otherwise PNG).",
+    )
+    parser.add_argument(
+        "--webp-quality",
+        type=int,
+        default=85,
+        help="WebP encoder quality from 1 to 100. Used only for WebP output.",
+    )
     parser.add_argument("--n", type=int, default=1, help="Number of images to request.")
 
 
@@ -817,6 +879,8 @@ def _add_prompt_args(parser: argparse.ArgumentParser) -> None:
 def _validate_common(args: argparse.Namespace) -> Path:
     if args.n < 1:
         raise CliError("--n must be at least 1.")
+    if not 1 <= args.webp_quality <= 100:
+        raise CliError("--webp-quality must be between 1 and 100.")
     return _resolve_cd(args.cd)
 
 
