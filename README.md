@@ -114,6 +114,24 @@ codex-imagegen edit \
 
 Edit accepts one to five `--image` inputs, matching the current Codex image tool limit.
 
+## Input And Output WebP
+
+The CLI uses WebP in two different places:
+
+- **Input WebP for edits.** When you run `edit`, local input images are resized if needed and converted to WebP before they are sent to Codex. This makes large PNG/JPEG files much smaller in the request, which helps avoid broken uploads and reduces pressure on Codex's input-image quota. Your original file is not modified.
+- **Output WebP for saved files.** Codex returns PNG image bytes. If `--out` ends in `.webp`, or you set `--output-format webp`, the CLI converts the returned PNG to WebP locally before saving it.
+
+Example:
+
+```bash
+codex-imagegen edit \
+  --image input/profile.png \
+  --prompt "make it more polished" \
+  --out output/profile.webp
+```
+
+In that command, `input/profile.png` is compacted to WebP for the request, and `output/profile.webp` is saved as WebP.
+
 ## Batch
 
 Batch mode runs JSONL jobs sequentially.
@@ -152,6 +170,8 @@ Each line can be either a JSON string prompt or an object with:
 - `--size auto|1024x1024|1536x1024|1024x1536`: direct `size` parameter.
 - `--output-format auto|png|webp`: output file format. Default: infer from `--out`; `.webp` writes WebP, everything else writes PNG.
 - `--webp-quality 1..100`: WebP encoder quality. Default: `85`.
+- `--input-max-edge PIXELS`: resize edit input images before upload so the longest edge is at most this value. Default: `1536`; use `0` to disable resizing.
+- `--input-webp-quality 1..100`: WebP quality for compacted edit input images. Default: `90`.
 - `--n COUNT`: request multiple output images. The CLI runs one hosted image request per output.
 - `--dry-run`: print the request shape without reading auth or contacting the backend
 
@@ -193,7 +213,7 @@ Edit requests add input images to the user message:
 {
   "content": [
     {"type": "input_text", "text": "Make it blue"},
-    {"type": "input_image", "image_url": "data:image/png;base64,..."}
+    {"type": "input_image", "image_url": "data:image/webp;base64,..."}
   ],
   "tools": [{"type": "image_generation"}]
 }
@@ -207,6 +227,7 @@ The accepted image preference values are:
 
 `n` is handled by the CLI by running one hosted image request per output path.
 For edit jobs, repeated outputs may wait for the per-minute input-image quota window before retrying; if the bucket stays full, retries back off progressively.
+Edit input images are compacted locally to WebP before upload by default. This keeps request bodies smaller and reduces pressure on the input-image quota.
 Codex returns PNG bytes; when the requested output is WebP, the CLI converts the PNG locally with Pillow.
 
 ## How It Works
@@ -215,6 +236,7 @@ Codex returns PNG bytes; when the requested output is WebP, the CLI converts the
 
 - reads Codex auth from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
 - refreshes the ChatGPT access token when needed
+- compacts edit input images to WebP before upload
 - sends a direct Codex `/responses` request with an exact hosted `image_generation` tool by default
 - streams the `image_generation_call.result` PNG bytes
 - writes PNG output directly, or converts locally to WebP when requested

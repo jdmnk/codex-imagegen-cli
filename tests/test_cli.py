@@ -187,6 +187,31 @@ def test_edit_dry_run_redacts_direct_input_images(tmp_path, capsys):
     assert payload["payload"]["tools"][0]["background"] == "auto"
 
 
+def test_edit_dry_run_compacts_valid_input_image_to_webp(tmp_path, capsys):
+    source = tmp_path / "source.png"
+    source.write_bytes(VALID_PNG_BYTES)
+    output = tmp_path / "output.png"
+
+    code = main(
+        [
+            "edit",
+            "--image",
+            str(source),
+            "--prompt",
+            "Make it blue",
+            "--out",
+            str(output),
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 0
+    assert payload["payload"]["input"][0]["content"][1]["image_url"] == "data:image/webp;base64,<redacted>"
+
+
 def test_model_default_prefers_env_before_codex_config(tmp_path, monkeypatch, capsys):
     codex_home = tmp_path / "codex-home"
     codex_home.mkdir()
@@ -418,6 +443,47 @@ def test_edit_encodes_input_image(tmp_path, monkeypatch):
     assert seen["payload"]["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,")
     assert seen["payload"]["tools"][0]["type"] == "image_generation"
     assert output.read_bytes() == PNG_BYTES
+
+
+def test_edit_resizes_large_input_image_before_upload(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    source = tmp_path / "source.png"
+    image_cls = cli.Image
+    image = image_cls.new("RGB", (2000, 1000), (255, 0, 0))
+    image.save(source, "PNG")
+    output = tmp_path / "edited.png"
+    seen = {}
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        seen["payload"] = payload
+        yield from _sse_image_result()
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    code = main(
+        [
+            "edit",
+            "--image",
+            str(source),
+            "--prompt",
+            "Replace the background",
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+            "--input-max-edge",
+            "1000",
+        ]
+    )
+
+    image_url = seen["payload"]["input"][0]["content"][1]["image_url"]
+    _, encoded = image_url.split(";base64,", 1)
+    with image_cls.open(cli.BytesIO(base64.b64decode(encoded))) as compacted:
+        size = compacted.size
+
+    assert code == 0
+    assert image_url.startswith("data:image/webp;base64,")
+    assert size == (1000, 500)
 
 
 def test_expired_token_is_refreshed(tmp_path, monkeypatch):

@@ -33,6 +33,8 @@ IMAGE_SIZE_CHOICES = ("auto", "1024x1024", "1536x1024", "1024x1536")
 OUTPUT_FORMAT_CHOICES = ("auto", "png", "webp")
 MAX_RESPONSES_IMAGE_RETRIES = 4
 INPUT_IMAGE_RATE_LIMIT_DELAYS = (65.0, 130.0, 260.0, 300.0)
+DEFAULT_INPUT_MAX_EDGE = 1536
+DEFAULT_INPUT_WEBP_QUALITY = 90
 
 
 class CliError(Exception):
@@ -432,14 +434,38 @@ def _load_ready_auth(args: argparse.Namespace) -> Tuple[dict[str, Any], Path]:
     return auth, auth_file
 
 
-def _data_url_for_image(path: Path) -> str:
+def _data_url_for_image(path: Path, args: argparse.Namespace) -> str:
     if not path.exists():
         raise CliError(f"Image file not found: {path}")
     if not path.is_file():
         raise CliError(f"Image path is not a file: {path}")
-    mime_type = mimetypes.guess_type(str(path))[0] or "image/png"
-    encoded = base64.b64encode(path.read_bytes()).decode("ascii")
+    image_bytes, mime_type = _encoded_input_image(path, args)
+    encoded = base64.b64encode(image_bytes).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def _encoded_input_image(path: Path, args: argparse.Namespace) -> Tuple[bytes, str]:
+    try:
+        with Image.open(path) as image:
+            image.load()
+            image = _resize_input_image(image, args.input_max_edge)
+            output = BytesIO()
+            image.save(output, "WEBP", quality=args.input_webp_quality)
+            return output.getvalue(), "image/webp"
+    except Exception as exc:
+        _warn(f"could not compact input image {path}; sending original bytes ({exc})")
+        return path.read_bytes(), mimetypes.guess_type(str(path))[0] or "image/png"
+
+
+def _resize_input_image(image: Image.Image, max_edge: int) -> Image.Image:
+    if max_edge > 0:
+        width, height = image.size
+        edge = max(width, height)
+        if edge > max_edge:
+            scale = max_edge / float(edge)
+            size = (max(1, round(width * scale)), max(1, round(height * scale)))
+            image = image.resize(size, Image.Resampling.LANCZOS)
+    return image.copy()
 
 
 def _codex_config_file(args: argparse.Namespace) -> Path:
@@ -475,7 +501,7 @@ def _responses_payload(
         if len(images) > MAX_EDIT_IMAGES:
             raise CliError(f"Edit supports at most {MAX_EDIT_IMAGES} images.")
         for image in images:
-            content.append({"type": "input_image", "image_url": _data_url_for_image(image)})
+            content.append({"type": "input_image", "image_url": _data_url_for_image(image, args)})
     image_tool = {
         "type": "image_generation",
         "output_format": "png",
@@ -866,6 +892,18 @@ def _add_image_args(parser: argparse.ArgumentParser) -> None:
         default=85,
         help="WebP encoder quality from 1 to 100. Used only for WebP output.",
     )
+    parser.add_argument(
+        "--input-max-edge",
+        type=int,
+        default=DEFAULT_INPUT_MAX_EDGE,
+        help="Resize edit input images so their longest edge is at most this many pixels. Use 0 to disable.",
+    )
+    parser.add_argument(
+        "--input-webp-quality",
+        type=int,
+        default=DEFAULT_INPUT_WEBP_QUALITY,
+        help="WebP quality from 1 to 100 for compacted edit input images.",
+    )
     parser.add_argument("--n", type=int, default=1, help="Number of images to request.")
 
 
@@ -881,6 +919,10 @@ def _validate_common(args: argparse.Namespace) -> Path:
         raise CliError("--n must be at least 1.")
     if not 1 <= args.webp_quality <= 100:
         raise CliError("--webp-quality must be between 1 and 100.")
+    if args.input_max_edge < 0:
+        raise CliError("--input-max-edge must be 0 or greater.")
+    if not 1 <= args.input_webp_quality <= 100:
+        raise CliError("--input-webp-quality must be between 1 and 100.")
     return _resolve_cd(args.cd)
 
 
