@@ -86,6 +86,13 @@ def _log(message: str) -> None:
 
 
 def _read_prompt(prompt: Optional[str], prompt_file: Optional[str], cd: Path) -> str:
+    text = _read_optional_prompt(prompt, prompt_file, cd)
+    if text is None:
+        raise CliError("Missing prompt. Use --prompt or --prompt-file.")
+    return text
+
+
+def _read_optional_prompt(prompt: Optional[str], prompt_file: Optional[str], cd: Path) -> Optional[str]:
     if prompt and prompt_file:
         raise CliError("Use --prompt or --prompt-file, not both.")
     if prompt_file:
@@ -96,10 +103,22 @@ def _read_prompt(prompt: Optional[str], prompt_file: Optional[str], cd: Path) ->
     elif prompt:
         text = prompt.strip()
     else:
-        raise CliError("Missing prompt. Use --prompt or --prompt-file.")
+        return None
     if not text:
         raise CliError("Prompt is empty.")
     return text
+
+
+def _style_transfer_prompt(extra_prompt: Optional[str] = None) -> str:
+    prompt = (
+        "Create a new version of the first input image. Preserve its main subject, identity, "
+        "composition, proportions, and important details. Use the final input image only as a style "
+        "reference: apply its visual medium, rendering approach, color palette, lighting, texture, "
+        "finish, and mood. Do not copy the style reference's subject or scene content."
+    )
+    if extra_prompt:
+        prompt += f"\n\nAdditional instruction: {extra_prompt}"
+    return prompt
 
 
 def _resolve_cd(raw_cd: Optional[str]) -> Path:
@@ -944,9 +963,15 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def _cmd_edit(args: argparse.Namespace) -> int:
     cd = _validate_common(args)
-    prompt = _read_prompt(args.prompt, args.prompt_file, cd)
+    prompt = _read_optional_prompt(args.prompt, args.prompt_file, cd)
+    if args.style_image:
+        prompt = _style_transfer_prompt(prompt)
+    elif prompt is None:
+        raise CliError("Missing prompt. Use --prompt, --prompt-file, or --style-image.")
     output_path = _resolve_path(args.out, cd)
     image_paths = [_resolve_path(raw, cd) for raw in args.image]
+    if args.style_image:
+        image_paths.append(_resolve_path(args.style_image, cd))
     _run_one(
         args=args,
         mode="edit",
@@ -1009,6 +1034,13 @@ def build_parser() -> argparse.ArgumentParser:
     edit = subparsers.add_parser("edit", help="Edit an image using one to five input images.")
     _add_prompt_args(edit)
     edit.add_argument("--image", action="append", required=True)
+    edit.add_argument(
+        "--style-image",
+        help=(
+            "Use this image as a style reference for the edit. "
+            "The --image inputs provide the content; --prompt becomes optional extra guidance."
+        ),
+    )
     _add_image_args(edit)
     _add_auth_args(edit)
     edit.set_defaults(func=_cmd_edit)

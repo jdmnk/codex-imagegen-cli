@@ -485,6 +485,81 @@ def test_edit_encodes_input_image(tmp_path, monkeypatch):
     assert output.read_bytes() == PNG_BYTES
 
 
+def test_edit_can_use_style_image_without_prompt(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    source = tmp_path / "source.png"
+    style = tmp_path / "style.png"
+    source.write_bytes(PNG_BYTES)
+    style.write_bytes(PNG_BYTES)
+    output = tmp_path / "styled.png"
+    seen = {}
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        seen["payload"] = payload
+        yield from _sse_image_result()
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    code = main(
+        [
+            "edit",
+            "--image",
+            str(source),
+            "--style-image",
+            str(style),
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+        ]
+    )
+
+    content = seen["payload"]["input"][0]["content"]
+    assert code == 0
+    assert content[0]["type"] == "input_text"
+    assert "Preserve its main subject" in content[0]["text"]
+    assert "Use the final input image only as a style reference" in content[0]["text"]
+    assert content[1]["type"] == "input_image"
+    assert content[2]["type"] == "input_image"
+    assert output.read_bytes() == PNG_BYTES
+
+
+def test_edit_style_image_keeps_prompt_as_extra_guidance(tmp_path, monkeypatch):
+    auth_file = _auth_file(tmp_path)
+    source = tmp_path / "source.png"
+    style = tmp_path / "style.png"
+    source.write_bytes(PNG_BYTES)
+    style.write_bytes(PNG_BYTES)
+    output = tmp_path / "styled.png"
+    seen = {}
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        seen["payload"] = payload
+        yield from _sse_image_result()
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    code = main(
+        [
+            "edit",
+            "--image",
+            str(source),
+            "--style-image",
+            str(style),
+            "--prompt",
+            "Keep the background bright.",
+            "--out",
+            str(output),
+            "--auth-file",
+            str(auth_file),
+        ]
+    )
+
+    text = seen["payload"]["input"][0]["content"][0]["text"]
+    assert code == 0
+    assert "Additional instruction: Keep the background bright." in text
+
+
 def test_edit_resizes_large_input_image_before_upload(tmp_path, monkeypatch):
     auth_file = _auth_file(tmp_path)
     source = tmp_path / "source.png"

@@ -114,6 +114,31 @@ codex-imagegen edit \
 
 Edit accepts one to five `--image` inputs, matching the current Codex image tool limit.
 
+### Style Reference Edits
+
+Use `--style-image` when you want to keep the idea/content from one image but render it in the style of another image.
+
+```bash
+codex-imagegen edit \
+  --image input/profile.png \
+  --style-image input/style-reference.png \
+  --out output/profile-in-style.webp
+```
+
+In this mode, `--image` is the content image and `--style-image` is only the style reference. The CLI writes a clear edit instruction for Codex: preserve the subject, identity, composition, proportions, and important details from `--image`; borrow the medium, rendering approach, palette, lighting, texture, finish, and mood from `--style-image`; do not copy the style reference's subject or scene.
+
+`--prompt` is optional with `--style-image`. If you include it, it is treated as extra guidance:
+
+```bash
+codex-imagegen edit \
+  --image input/profile.png \
+  --style-image input/editorial-lighting.png \
+  --prompt "keep the background bright and professional" \
+  --out output/profile-editorial.webp
+```
+
+The style image counts toward the same one-to-five edit image limit.
+
 ## Input And Output WebP
 
 The CLI uses WebP in two different places:
@@ -168,6 +193,7 @@ Each line can be either a JSON string prompt or an object with:
 - `--background auto|transparent|opaque`: direct `background` parameter.
 - `--quality auto|low|medium|high`: direct `quality` parameter.
 - `--size auto|1024x1024|1536x1024|1024x1536`: direct `size` parameter.
+- `--style-image PATH`: edit mode only. Use this image as the style reference; `--image` stays the content image and `--prompt` becomes optional extra guidance.
 - `--output-format auto|png|webp`: output file format. Default: infer from `--out`; `.webp` writes WebP, everything else writes PNG.
 - `--webp-quality 1..100`: WebP encoder quality. Default: `85`.
 - `--input-max-edge PIXELS`: resize edit input images before upload so the longest edge is at most this value. Default: `1536`; use `0` to disable resizing.
@@ -218,6 +244,8 @@ Edit requests add input images to the user message:
   "tools": [{"type": "image_generation"}]
 }
 ```
+
+With `--style-image`, the content image is sent first and the style image is sent last. The text instruction labels that final image as style-only, so Codex has a clearer separation between "what to keep" and "what visual style to borrow."
 
 The accepted image preference values are:
 
