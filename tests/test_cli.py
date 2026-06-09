@@ -408,6 +408,46 @@ def test_streamed_image_failure_message_is_concise():
     )
 
 
+def test_post_sse_wraps_low_level_transport_error(monkeypatch):
+    def fake_urlopen(req, timeout):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr(cli.request, "urlopen", fake_urlopen)
+
+    with pytest.raises(cli.TransportError) as exc:
+        list(cli._post_sse("https://example.test/responses", headers={}, payload={}, timeout=1))
+
+    assert str(exc.value) == "Request failed while reading streamed response: [Errno 32] Broken pipe"
+
+
+def test_stream_transport_error_is_user_facing(tmp_path, monkeypatch, capsys):
+    auth_file = _auth_file(tmp_path)
+    output = tmp_path / "mug.png"
+
+    def fake_post_sse(url, *, headers, payload, timeout):
+        raise cli.TransportError("Request failed while reading streamed response: [Errno 32] Broken pipe")
+        yield
+
+    monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
+
+    with pytest.raises(SystemExit) as exc:
+        main(
+            [
+                "generate",
+                "--prompt",
+                "A studio photo of a mug",
+                "--out",
+                str(output),
+                "--auth-file",
+                str(auth_file),
+            ]
+        )
+
+    captured = capsys.readouterr()
+    assert exc.value.code == 1
+    assert "Error: Request failed while reading streamed response: [Errno 32] Broken pipe" in captured.err
+
+
 def test_edit_encodes_input_image(tmp_path, monkeypatch):
     auth_file = _auth_file(tmp_path)
     source = tmp_path / "source.png"

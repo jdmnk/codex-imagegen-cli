@@ -48,6 +48,10 @@ class HttpError(CliError):
         self.body = body
 
 
+class TransportError(CliError):
+    """Network/socket failure before a complete API response was received."""
+
+
 class ResponsesImageGenerationError(CliError):
     def __init__(self, event: dict[str, Any]) -> None:
         self.event = event
@@ -334,7 +338,9 @@ def _post_json(
         raw = exc.read().decode("utf-8", errors="replace")
         raise HttpError(exc.code, raw) from exc
     except error.URLError as exc:
-        raise CliError(f"Request failed: {exc.reason}") from exc
+        raise TransportError(f"Request failed: {exc.reason}") from exc
+    except OSError as exc:
+        raise TransportError(f"Request failed: {exc}") from exc
     if not raw:
         return {}
     try:
@@ -382,7 +388,9 @@ def _post_sse(
         raw = exc.read().decode("utf-8", errors="replace")
         raise HttpError(exc.code, raw) from exc
     except error.URLError as exc:
-        raise CliError(f"Request failed: {exc.reason}") from exc
+        raise TransportError(f"Request failed while reading streamed response: {exc.reason}") from exc
+    except OSError as exc:
+        raise TransportError(f"Request failed while reading streamed response: {exc}") from exc
 
 
 def _parse_sse_block(block: str) -> Optional[Tuple[Optional[str], str]]:
