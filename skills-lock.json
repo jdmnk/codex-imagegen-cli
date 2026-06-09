@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "context-checkpoint": {
+      "source": "jdmnk/context-checkpoint-skill",
+      "sourceType": "github",
+      "skillPath": "skills/context-checkpoint/SKILL.md",
+      "computedHash": "92b38d3981d12ba5b3fe81d4680dd2ddcc92a6dd842a7f1926a9d4da1e77ed7f"
+    }
+  }
+}

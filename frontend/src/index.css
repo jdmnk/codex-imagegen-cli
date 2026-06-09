@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 36 18% 97%;
+    --foreground: 24 10% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 24 10% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 10% 10%;
+    --primary: 173 69% 28%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 38 14% 92%;
+    --secondary-foreground: 24 10% 10%;
+    --muted: 39 17% 94%;
+    --muted-foreground: 25 6% 38%;
+    --accent: 173 23% 91%;
+    --accent-foreground: 173 76% 18%;
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 32 13% 84%;
+    --input: 32 13% 80%;
+    --ring: 173 76% 26%;
+    --radius: 8px;
+    --code: 24 9% 12%;
+    --code-foreground: 40 14% 92%;
+    --warning: 37 92% 46%;
+    --warning-foreground: 28 80% 20%;
+  }
+
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    font-family:
+      "Aptos",
+      "Helvetica Neue",
+      ui-sans-serif,
+      system-ui,
+      sans-serif;
+  }
+}
+
+@layer utilities {
+  .bg-code {
+    background-color: hsl(var(--code));
+  }
+
+  .text-code-foreground {
+    color: hsl(var(--code-foreground));
+  }
+
+  .border-warning\/30 {
+    border-color: hsl(var(--warning) / 0.3);
+  }
+
+  .bg-warning\/10 {
+    background-color: hsl(var(--warning) / 0.1);
+  }
+
+  .text-warning-foreground {
+    color: hsl(var(--warning-foreground));
+  }
+}
