@@ -47,7 +47,7 @@ codex-imagegen-cli = "codex_imagegen_cli.cli:main"
 dev = [
   "build>=1.2.2.post1",
   "pytest>=8.3",
-  "ruff>=0.8",
+  "ruff>=0.15.20",
   "twine>=6.0",
 ]
 
