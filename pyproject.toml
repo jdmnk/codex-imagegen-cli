@@ -30,7 +30,7 @@ classifiers = [
   "Topic :: Utilities",
 ]
 dependencies = [
-    "pillow>=11.0",
+    "pillow>=12.3.0",
 ]
 
 [project.urls]
