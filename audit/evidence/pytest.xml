@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?><testsuites name="pytest tests"><testsuite name="pytest" errors="0" failures="14" skipped="0" tests="43" time="0.820" timestamp="2026-09-15T12:54:45.574497+00:00" hostname="snap-coding"><testcase classname="tests.test_cli" name="test_generate_dry_run_prints_codex_request" time="0.006" /><testcase classname="tests.test_cli" name="test_generate_dry_run_prints_multiple_direct_outputs" time="0.003" /><testcase classname="tests.test_cli" name="test_edit_dry_run_redacts_direct_input_images" time="0.039" /><testcase classname="tests.test_cli" name="test_edit_dry_run_compacts_valid_input_image_to_webp" time="0.005" /><testcase classname="tests.test_cli" name="test_model_default_prefers_env_before_codex_config" time="0.004" /><testcase classname="tests.test_cli" name="test_generate_writes_backend_image" time="0.021" /><testcase classname="tests.test_cli" name="test_generate_converts_webp_output_from_file_extension" time="0.021" /><testcase classname="tests.test_cli" name="test_output_format_can_force_webp_with_png_extension" time="0.022" /><testcase classname="tests.test_cli" name="test_direct_backend_retries_streamed_rate_limit" time="0.019" /><testcase classname="tests.test_cli" name="test_input_image_rate_limit_waits_for_minute_window" time="0.001" /><testcase classname="tests.test_cli" name="test_input_image_rate_limit_retry_reason_is_specific" time="0.000" /><testcase classname="tests.test_cli" name="test_streamed_image_failure_message_is_concise" time="0.000" /><testcase classname="tests.test_cli" name="test_post_sse_wraps_low_level_transport_error" time="0.001" /><testcase classname="tests.test_cli" name="test_stream_transport_error_is_user_facing" time="0.021" /><testcase classname="tests.test_cli" name="test_edit_encodes_input_image" time="0.020" /><testcase classname="tests.test_cli" name="test_edit_can_use_style_image_without_prompt" time="0.025" /><testcase classname="tests.test_cli" name="test_edit_style_image_keeps_prompt_as_extra_guidance" time="0.020" /><testcase classname="tests.test_cli" name="test_edit_resizes_large_input_image_before_upload" time="0.162" /><testcase classname="tests.test_cli" name="test_expired_token_is_refreshed" time="0.024" /><testcase classname="tests.test_cli" name="test_batch_accepts_jsonl_string_jobs" time="0.003" /><testcase classname="tests.test_cli" name="test_size_rejects_unknown_value" time="0.003" /><testcase classname="tests.test_cli" name="test_webp_quality_rejects_out_of_range" time="0.003" /><testcase classname="tests.test_cli" name="test_version_flag" time="0.002" /><testcase classname="audit.test_controls" name="test_real_sse_reader_handles_lf_delimited_events" time="0.001" /><testcase classname="audit.test_controls" name="test_multiple_outputs_are_valid_numbered_images" time="0.004" /><testcase classname="audit.test_controls" name="test_existing_output_is_protected_before_backend_call" time="0.003" /><testcase classname="audit.test_controls" name="test_batch_handles_backend_job_failures[False]" time="0.003" /><testcase classname="audit.test_controls" name="test_batch_handles_backend_job_failures[True]" time="0.003" /><testcase classname="audit.test_controls" name="test_dry_run_never_reads_auth" time="0.003" /><testcase classname="audit.test_regressions" name="test_refresh_preserves_id_token_as_jwt_string" time="0.001"><failure message="AssertionError: assert {'chatgpt_account_id': None, 'chatgpt_account_is_fedramp': False, 'chatgpt_plan_type': None, 'chatgpt_user_id': None, ...} == 'e30.eyJlbWFpbCI6ICJ0ZXN0QGV4YW1wbGUuaW52YWxpZCJ9.signature'">audit/test_regressions.py:49: in test_refresh_preserves_id_token_as_jwt_string
+    assert json.loads(path.read_text())["tokens"]["id_token"] == new_id
+E   AssertionError: assert {'chatgpt_account_id': None, 'chatgpt_account_is_fedramp': False, 'chatgpt_plan_type': None, 'chatgpt_user_id': None, ...} == 'e30.eyJlbWFpbCI6ICJ0ZXN0QGV4YW1wbGUuaW52YWxpZCJ9.signature'</failure></testcase><testcase classname="audit.test_regressions" name="test_stream_accepts_crlf_event_separators" time="0.001"><failure message="codex_imagegen_cli.cli.CliError: Responses stream ended without an image generation result.">audit/test_regressions.py:60: in test_stream_accepts_crlf_event_separators
+    assert cli._stream_image_result("https://example.invalid", headers={}, payload={}, timeout=1)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:812: in _stream_image_result
+    raise CliError("Responses stream ended without an image generation result.")
+E   codex_imagegen_cli.cli.CliError: Responses stream ended without an image generation result.</failure></testcase><testcase classname="audit.test_regressions" name="test_stream_accepts_result_in_completed_response" time="0.001"><failure message="codex_imagegen_cli.cli.CliError: Responses stream ended without an image generation result.">audit/test_regressions.py:69: in test_stream_accepts_result_in_completed_response
+    assert cli._stream_image_result("https://example.invalid", headers={}, payload={}, timeout=1) == encoded
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:812: in _stream_image_result
+    raise CliError("Responses stream ended without an image generation result.")
+E   codex_imagegen_cli.cli.CliError: Responses stream ended without an image generation result.</failure></testcase><testcase classname="audit.test_regressions" name="test_truncated_http_response_has_cli_transport_error" time="0.001"><failure message="http.client.IncompleteRead: IncompleteRead(7 bytes read, 100 more expected)">audit/test_regressions.py:79: in test_truncated_http_response_has_cli_transport_error
+    list(cli._post_sse("https://example.invalid", headers={}, payload={}, timeout=1))
+codex_imagegen_cli/cli.py:391: in _post_sse
+    with request.urlopen(req, timeout=timeout) as response:
+/usr/lib/python3.12/contextlib.py:137: in __enter__
+    return next(self.gen)
+           ^^^^^^^^^^^^^^
+audit/test_regressions.py:75: in broken
+    raise IncompleteRead(b"partial", 100)
+E   http.client.IncompleteRead: IncompleteRead(7 bytes read, 100 more expected)</failure></testcase><testcase classname="audit.test_regressions" name="test_rate_limit_retry_also_works_after_http_errors[False]" time="0.003"><failure message="codex_imagegen_cli.cli.HttpError: HTTP 429: rate limited">audit/test_regressions.py:101: in test_rate_limit_retry_also_works_after_http_errors
+    assert cli._call_responses_backend(args=args, mode="generate", prompt="test", output_path=tmp_path / "out.png")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:701: in _call_responses_backend
+    encoded = _stream_image_result(
+audit/test_regressions.py:93: in stream
+    raise result
+E   codex_imagegen_cli.cli.HttpError: HTTP 429: rate limited</failure></testcase><testcase classname="audit.test_regressions" name="test_rate_limit_retry_also_works_after_http_errors[True]" time="0.003"><failure message="codex_imagegen_cli.cli.ResponsesImageGenerationError: Responses image generation failed (rate_limit_exceeded): Please try again in 1ms.">audit/test_regressions.py:93: in stream
+    raise result
+E   codex_imagegen_cli.cli.HttpError: HTTP 401: expired
+
+During handling of the above exception, another exception occurred:
+audit/test_regressions.py:101: in test_rate_limit_retry_also_works_after_http_errors
+    assert cli._call_responses_backend(args=args, mode="generate", prompt="test", output_path=tmp_path / "out.png")
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:713: in _call_responses_backend
+    encoded = _stream_image_result(
+audit/test_regressions.py:93: in stream
+    raise result
+E   codex_imagegen_cli.cli.ResponsesImageGenerationError: Responses image generation failed (rate_limit_exceeded): Please try again in 1ms.</failure></testcase><testcase classname="audit.test_regressions" name="test_batch_null_images_behaves_as_empty_list" time="0.003"><failure message="TypeError: 'NoneType' object is not iterable">audit/test_regressions.py:109: in test_batch_null_images_behaves_as_empty_list
+    assert cli.main(["batch", "--input", str(jobs), "--out-dir", str(tmp_path)]) == 0
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:1064: in main
+    return int(args.func(args))
+               ^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:997: in _cmd_batch
+    images = [_resolve_path(raw, cd) for raw in job.get("images", [])]
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   TypeError: 'NoneType' object is not iterable</failure></testcase><testcase classname="audit.test_regressions" name="test_batch_rejects_nontext_prompt" time="0.001"><failure message="Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;">audit/test_regressions.py:115: in test_batch_rejects_nontext_prompt
+    with pytest.raises(cli.CliError):
+E   Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;</failure></testcase><testcase classname="audit.test_regressions" name="test_batch_invalid_job_does_not_abort_remaining_jobs" time="0.003"><failure message="AssertionError: assert [] == ['good']&#10;  &#10;  Right contains one more item: 'good'&#10;  Use -v to get more diff">audit/test_regressions.py:128: in test_batch_invalid_job_does_not_abort_remaining_jobs
+    assert visited == ["good"]
+E   AssertionError: assert [] == ['good']
+E
+E     Right contains one more item: 'good'
+E     Use -v to get more diff</failure></testcase><testcase classname="audit.test_regressions" name="test_config_does_not_use_model_from_inactive_profile" time="0.003"><failure message="AssertionError: assert 'unavailable-model' == 'gpt-5.5'&#10;  &#10;  - gpt-5.5&#10;  + unavailable-model">audit/test_regressions.py:137: in test_config_does_not_use_model_from_inactive_profile
+    assert cli._default_model(args) == cli.DEFAULT_CODEX_MODEL
+E   AssertionError: assert 'unavailable-model' == 'gpt-5.5'
+E
+E     - gpt-5.5
+E     + unavailable-model</failure></testcase><testcase classname="audit.test_regressions" name="test_compaction_applies_exif_orientation" time="0.004"><failure message="assert (40, 20) == (20, 40)&#10;  &#10;  At index 0 diff: 40 != 20&#10;  Use -v to get more diff">audit/test_regressions.py:148: in test_compaction_applies_exif_orientation
+    assert output.size == (20, 40)
+E   assert (40, 20) == (20, 40)
+E
+E     At index 0 diff: 40 != 20
+E     Use -v to get more diff</failure></testcase><testcase classname="audit.test_regressions" name="test_corrupt_base64_does_not_create_successful_output" time="0.001"><failure message="Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;">audit/test_regressions.py:153: in test_corrupt_base64_does_not_create_successful_output
+    with pytest.raises(cli.CliError):
+E   Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;</failure></testcase><testcase classname="audit.test_regressions" name="test_timeout_must_be_positive" time="0.003"><failure message="Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;">audit/test_regressions.py:161: in test_timeout_must_be_positive
+    with pytest.raises(cli.CliError):
+E   Failed: DID NOT RAISE &lt;class 'codex_imagegen_cli.cli.CliError'&gt;</failure></testcase><testcase classname="audit.test_regressions" name="test_prompt_directory_is_a_user_facing_error" time="0.001"><failure message="IsADirectoryError: [Errno 21] Is a directory: '/tmp/pytest-of-jure/pytest-6/test_prompt_directory_is_a_use0'">audit/test_regressions.py:167: in test_prompt_directory_is_a_user_facing_error
+    cli._read_prompt(None, str(tmp_path), tmp_path)
+codex_imagegen_cli/cli.py:89: in _read_prompt
+    text = _read_optional_prompt(prompt, prompt_file, cd)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+codex_imagegen_cli/cli.py:102: in _read_optional_prompt
+    text = path.read_text(encoding="utf-8").strip()
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/pathlib.py:1029: in read_text
+    with self.open(mode='r', encoding=encoding, errors=errors) as f:
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+/usr/lib/python3.12/pathlib.py:1015: in open
+    return io.open(self, mode, buffering, encoding, errors, newline)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   IsADirectoryError: [Errno 21] Is a directory: '/tmp/pytest-of-jure/pytest-6/test_prompt_directory_is_a_use0'</failure></testcase></testsuite></testsuites>

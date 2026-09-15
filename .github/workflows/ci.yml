@@ -15,17 +15,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.10", "3.12", "3.14"]
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Install uv
         uses: astral-sh/setup-uv@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -36,13 +36,15 @@ jobs:
         run: uv sync --frozen --dev
 
       - name: Lint
-        run: uv run ruff check .
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
 
       - name: Test
         run: uv run pytest
 
       - name: Build package
-        run: uv run python -m build
+        run: uv run python -m build --installer uv
 
       - name: Check package metadata
         run: uv run python -m twine check dist/*

@@ -1,0 +1,12 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-9.1.1, pluggy-1.6.0 -- /home/jure/codex-imagegen-cli/.venv/bin/python
+cachedir: .pytest_cache
+rootdir: /home/jure/codex-imagegen-cli
+configfile: pyproject.toml
+testpaths: tests
+collecting ... collected 98 items / 96 deselected / 2 selected
+
+tests/test_live.py::test_live_native_generate_and_edit PASSED            [ 50%]
+tests/test_live.py::test_live_responses_compatibility PASSED             [100%]
+
+====================== 2 passed, 96 deselected in 51.95s =======================
