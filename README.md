@@ -27,13 +27,13 @@ Uses your existing **Codex ChatGPT login** — no `OPENAI_API_KEY` required.
 
 [Codex](https://github.com/openai/codex) (OpenAI's CLI coding agent) has image generation built in — but it's prompt-driven and agentic, not a scriptable command. There is no `codex image generate` subcommand, no `--size` or `--quality` flags, and the documented automation primitive (`codex exec`) emits assistant text, not image bytes.
 
-This CLI fills that gap by calling Codex's backend directly, using your existing ChatGPT subscription auth. No `OPENAI_API_KEY` needed, as it's not API billing - just the same image generation Codex uses internally, exposed as a scriptable tool for `generate`, `edit`, and `batch` workflows with clear options for **model**, **size**, **quality**, **background**, and **output**.
+This CLI fills that gap by calling Codex's backend directly, using your existing ChatGPT subscription auth. No `OPENAI_API_KEY` needed, as it's not API billing - just the same image generation Codex uses internally, exposed as a scriptable tool for `generate`, `edit`, and `batch` workflows with clear options for **reasoning model** (Responses backend), **size**, **quality**, **background**, and **output**.
 
 ## Requirements
 
 - Python 3.10+
 - `uv`
-- Codex logged in with ChatGPT auth
+- Codex logged in with file-based ChatGPT auth
 
 Run Codex login once if needed:
 
@@ -41,7 +41,7 @@ Run Codex login once if needed:
 codex login
 ```
 
-Choose the ChatGPT login flow. The CLI reads `$CODEX_HOME/auth.json` or `~/.codex/auth.json`, refreshes tokens when needed, and never prints token values.
+Choose the ChatGPT login flow. The CLI reads `$CODEX_HOME/auth.json` or `~/.codex/auth.json`, refreshes tokens when needed, and never prints token values. Keyring-only and ephemeral credentials are not supported; if needed, set `cli_auth_credentials_store = "file"` in Codex `config.toml` before logging in.
 
 ## First Run
 
@@ -92,7 +92,7 @@ codex-imagegen generate \
   --n 3
 ```
 
-Multiple outputs are written as `bronze-shield-1.png`, `bronze-shield-2.png`, and so on.
+Multiple outputs are written as `bronze-shield-1.png`, `bronze-shield-2.png`, and so on. Each saved path is printed immediately; if a later request fails, earlier outputs remain available.
 
 Write WebP directly by using a `.webp` output path:
 
@@ -143,7 +143,7 @@ The style image counts toward the same one-to-five edit image limit.
 
 The CLI uses WebP in two different places:
 
-- **Input WebP for edits.** When you run `edit`, local input images are resized if needed and converted to WebP before they are sent to Codex. This makes large PNG/JPEG files much smaller in the request, which helps avoid broken uploads and reduces pressure on Codex's input-image quota. Your original file is not modified.
+- **Input WebP for edits.** When you run `edit`, local input images are corrected for EXIF orientation, resized if needed, and converted to WebP before they are sent to Codex. This makes large PNG/JPEG files much smaller in the request, which helps avoid broken uploads and reduces pressure on Codex's input-image quota. Your original file is not modified.
 - **Output WebP for saved files.** Codex returns PNG image bytes. If `--out` ends in `.webp`, or you set `--output-format webp`, the CLI converts the returned PNG to WebP locally before saving it.
 
 Example:
@@ -155,7 +155,7 @@ codex-imagegen edit \
   --out output/profile.webp
 ```
 
-In that command, `input/profile.png` is compacted to WebP for the request, and `output/profile.webp` is saved as WebP.
+In that command, `input/profile.png` is compacted to WebP for the request, and `output/profile.webp` is saved as WebP. Invalid input images are rejected locally. Output images are validated and saved atomically, preserving existing files if validation or conversion fails.
 
 ## Batch
 
@@ -176,10 +176,12 @@ codex-imagegen batch \
 
 Each line can be either a JSON string prompt or an object with:
 
-- `prompt`: required text prompt
-- `out`: optional output filename, resolved under `--out-dir`
-- `images`: optional list of image paths for edit jobs
+- `prompt`: required non-empty text prompt
+- `out`: optional output filename, resolved under `--out-dir`; paths escaping that directory are rejected
+- `images`: optional list of image paths for edit jobs; `null` is treated as an empty list
 - `mode`: optional `generate` or `edit`; defaults to `edit` when images are present
+
+Per-job validation or backend failures are reported and later jobs continue unless `--fail-fast` is set. Any failed job produces exit status 1.
 
 ## Useful Flags
 
@@ -188,11 +190,14 @@ Each line can be either a JSON string prompt or an object with:
 - `--cd PATH`: base directory for resolving relative paths
 - `--auth-file PATH`: read a specific Codex `auth.json`
 - `--codex-home PATH`: read auth from another Codex home directory
-- `--model MODEL`: override the Codex reasoning model used by the direct hosted image tool.
+- `--backend native|responses`: choose the backend; default: `native`.
+- `--model MODEL` / `--reasoning-model MODEL`: override the reasoning model with `--backend responses` only; does not select the image generator.
+- `--profile NAME`: select a Codex reasoning-model profile with `--backend responses` only.
 - `--base-url URL`: override the Codex backend URL for development
-- `--background auto|transparent|opaque`: direct `background` parameter.
+- `--background auto|opaque`: direct `background` parameter. Explicit `transparent` is unsupported on the tested backend and rejected locally.
 - `--quality auto|low|medium|high`: direct `quality` parameter.
-- `--size auto|1024x1024|1536x1024|1024x1536`: direct `size` parameter.
+- `--size auto|WIDTHxHEIGHT`: requested dimensions; see constraints below.
+- `--size-policy warn|error`: on a dimension mismatch, warn and save (default), or fail without writing the output.
 - `--style-image PATH`: edit mode only. Use this image as the style reference; `--image` stays the content image and `--prompt` becomes optional extra guidance.
 - `--output-format auto|png|webp`: output file format. Default: infer from `--out`; `.webp` writes WebP, everything else writes PNG.
 - `--webp-quality 1..100`: WebP encoder quality. Default: `85`.
@@ -203,11 +208,20 @@ Each line can be either a JSON string prompt or an object with:
 
 ## Backend Path
 
-The CLI calls Codex directly through the enabled hosted image-generation path:
+The default `--backend native` uses Codex's native image endpoints:
+
+```text
+POST https://chatgpt.com/backend-api/codex/images/generations
+POST https://chatgpt.com/backend-api/codex/images/edits
+```
+
+Generation sends `model`, `prompt`, `size`, `quality`, and `background`; edits also send `images: [{"image_url": "data:image/webp;base64,..."}]`. Results contain `data[].b64_json`. The fixed request field `model: "gpt-image-2"` follows Codex's request format; it does not verify the actual output model. The backend controls the image generator, and GPT Image 2.5 availability cannot be confirmed. There is no `--image-model` option; `CODEX_IMAGEGEN_IMAGE_MODEL` has no effect.
+
+Use `--backend responses` for the original hosted image-generation path:
 
 `POST https://chatgpt.com/backend-api/codex/responses`
 
-The request forces the hosted `image_generation` tool and sends exact image options as tool parameters:
+On this backend, the request forces the hosted `image_generation` tool and sends image options as tool parameters:
 
 ```json
 {
@@ -233,7 +247,7 @@ The request forces the hosted `image_generation` tool and sends exact image opti
 }
 ```
 
-Edit requests add input images to the user message:
+Responses edit requests add input images to the user message:
 
 ```json
 {
@@ -247,11 +261,15 @@ Edit requests add input images to the user message:
 
 With `--style-image`, the content image is sent first and the style image is sent last. The text instruction labels that final image as style-only, so Codex has a clearer separation between "what to keep" and "what visual style to borrow."
 
+With `--backend responses`, reasoning-model precedence is `--model`, `CODEX_IMAGEGEN_MODEL`, the selected Codex profile, the top-level Codex model, then `gpt-5.5`. `--profile` overrides the profile selected in `config.toml`. Native requests do not use reasoning-model settings. Existing commands with `--model` must add `--backend responses`; there is no automatic fallback between backends.
+
 The accepted image preference values are:
 
-- `size`: `auto`, `1024x1024` square, `1536x1024` landscape, or `1024x1536` portrait
+- `size`: `auto` or `WIDTHxHEIGHT`, including `1024x1024` square, `1536x1024` landscape, or `1024x1536` portrait. Explicit dimensions must be divisible by 16, with no edge above 3840, an aspect ratio between 1:3 and 3:1, and 655,360–8,294,400 total pixels.
 - `quality`: `auto`, `low`, `medium`, or `high`
-- `background`: `auto`, `transparent`, or `opaque`
+- `background`: `auto` or `opaque`
+
+Requested dimensions are not guaranteed. The CLI reports actual dimensions and warns on mismatches by default. `--size-policy error` rejects a mismatched output without saving it, even with `--force`; the generation has already occurred and may have consumed usage. The CLI does not resize or crop output to match the request.
 
 `n` is handled by the CLI by running one hosted image request per output path.
 For edit jobs, repeated outputs may wait for the per-minute input-image quota window before retrying; if the bucket stays full, retries back off progressively.
@@ -265,9 +283,9 @@ Codex returns PNG bytes; when the requested output is WebP, the CLI converts the
 - reads Codex auth from `$CODEX_HOME/auth.json` or `~/.codex/auth.json`
 - refreshes the ChatGPT access token when needed
 - compacts edit input images to WebP before upload
-- sends a direct Codex `/responses` request with an exact hosted `image_generation` tool by default
-- streams the `image_generation_call.result` PNG bytes
-- writes PNG output directly, or converts locally to WebP when requested
+- sends a native Codex image request by default, or a hosted `image_generation` tool request with `--backend responses`
+- decodes PNG bytes from the native JSON response or streamed Responses result
+- validates and atomically saves PNG output, or converts locally to WebP when requested
 
 Dry runs only print the planned request and output paths; they do not read auth or contact Codex.
 
@@ -277,8 +295,8 @@ This project relies on Codex's current authenticated app behavior, not a public 
 
 A few things worth knowing:
 
-- **Subscription only.** The built-in Codex image generation path is gated to ChatGPT auth (Plus, Pro, Business, Edu, Enterprise). It is not available on the Free plan and does not work with an `OPENAI_API_KEY` session — that key routes to the Images API instead, under separate billing.
-- **Usage limits apply.** Image generations consume your Codex account's included limits, roughly 3–5× faster than a comparable non-image turn. Edit jobs also consume an input-image quota; if that per-minute bucket is full, the CLI waits and retries.
+- **Subscription only.** This CLI requires file-based ChatGPT auth and account access to Codex image generation. It does not support API-key sessions or route requests to the public Images API. Account eligibility can change.
+- **Usage limits apply.** Image generations consume your Codex account's included limits. Edit jobs also consume an input-image quota; if that per-minute bucket is full, the CLI waits and retries.
 - **No stable API contract.** Codex internals and account policies can change. The CLI may stop working or behave differently after a Codex update, and OpenAI has not documented this as a supported automation surface.
 
 We will try to keep this project updated as long as this usage remains possible and allowed.
@@ -290,13 +308,20 @@ uv lock --check
 uv sync --dev
 uv run pytest
 uv run ruff check .
+uv run ruff format --check .
 ```
 
 Build and validate release artifacts:
 
 ```bash
-uv run python -m build
+uv run python -m build --installer uv
 uv run python -m twine check dist/*
+```
+
+Offline tests use synthetic credentials. Opt-in live checks make three image requests (native generation/edit and Responses generation), consume account usage, and disable credential refresh:
+
+```bash
+CODEX_IMAGEGEN_LIVE_TEST=1 uv run pytest -m live -v
 ```
 
 ## Update And Uninstall
@@ -320,6 +345,6 @@ Report security issues privately through GitHub Security Advisories when availab
 
 ## Project Status
 
-`0.1.0` is an alpha source-install release. The CLI command shape, JSONL batch format, and Codex backend behavior may change before a stable release.
+`0.2.0` is an alpha source-install release. The CLI command shape, JSONL batch format, and Codex backend behavior may change before a stable release.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), and [LICENSE](LICENSE).

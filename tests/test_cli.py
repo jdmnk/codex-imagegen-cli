@@ -7,13 +7,19 @@ import time
 import pytest
 
 from codex_imagegen_cli import cli
-from codex_imagegen_cli.cli import main
+from codex_imagegen_cli.cli import main as cli_main
 
 
-PNG_BYTES = b"\x89PNG\r\n\x1a\n"
+def main(argv):
+    if argv and argv[0] in {"generate", "edit", "batch"}:
+        argv = [argv[0], "--backend", "responses", *argv[1:]]
+    return cli_main(argv)
+
+
 VALID_PNG_BYTES = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC"
 )
+PNG_BYTES = VALID_PNG_BYTES
 
 
 def _jwt(payload: dict[str, object]) -> str:
@@ -34,7 +40,7 @@ def _auth_file(tmp_path, access_token: str = "token"):
                     "access_token": access_token,
                     "refresh_token": "refresh",
                     "account_id": "acct_123",
-                    "id_token": {"chatgpt_account_is_fedramp": False},
+                    "id_token": _jwt({"email": "test@example.invalid"}),
                 },
             }
         ),
@@ -183,7 +189,10 @@ def test_edit_dry_run_redacts_direct_input_images(tmp_path, capsys):
 
     assert code == 0
     assert payload["url"] == "https://chatgpt.com/backend-api/codex/responses"
-    assert payload["payload"]["input"][0]["content"][1]["image_url"] == "data:image/png;base64,<redacted>"
+    assert (
+        payload["payload"]["input"][0]["content"][1]["image_url"]
+        == "data:image/webp;base64,<redacted>"
+    )
     assert payload["payload"]["tools"][0]["background"] == "auto"
 
 
@@ -209,7 +218,10 @@ def test_edit_dry_run_compacts_valid_input_image_to_webp(tmp_path, capsys):
     payload = json.loads(captured.out)
 
     assert code == 0
-    assert payload["payload"]["input"][0]["content"][1]["image_url"] == "data:image/webp;base64,<redacted>"
+    assert (
+        payload["payload"]["input"][0]["content"][1]["image_url"]
+        == "data:image/webp;base64,<redacted>"
+    )
 
 
 def test_model_default_prefers_env_before_codex_config(tmp_path, monkeypatch, capsys):
@@ -417,7 +429,9 @@ def test_post_sse_wraps_low_level_transport_error(monkeypatch):
     with pytest.raises(cli.TransportError) as exc:
         list(cli._post_sse("https://example.test/responses", headers={}, payload={}, timeout=1))
 
-    assert str(exc.value) == "Request failed while reading streamed response: [Errno 32] Broken pipe"
+    assert (
+        str(exc.value) == "Request failed while reading streamed response: [Errno 32] Broken pipe"
+    )
 
 
 def test_stream_transport_error_is_user_facing(tmp_path, monkeypatch, capsys):
@@ -425,7 +439,9 @@ def test_stream_transport_error_is_user_facing(tmp_path, monkeypatch, capsys):
     output = tmp_path / "mug.png"
 
     def fake_post_sse(url, *, headers, payload, timeout):
-        raise cli.TransportError("Request failed while reading streamed response: [Errno 32] Broken pipe")
+        raise cli.TransportError(
+            "Request failed while reading streamed response: [Errno 32] Broken pipe"
+        )
         yield
 
     monkeypatch.setattr(cli, "_post_sse", fake_post_sse)
@@ -445,7 +461,10 @@ def test_stream_transport_error_is_user_facing(tmp_path, monkeypatch, capsys):
 
     captured = capsys.readouterr()
     assert exc.value.code == 1
-    assert "Error: Request failed while reading streamed response: [Errno 32] Broken pipe" in captured.err
+    assert (
+        "Error: Request failed while reading streamed response: [Errno 32] Broken pipe"
+        in captured.err
+    )
 
 
 def test_edit_encodes_input_image(tmp_path, monkeypatch):
@@ -480,7 +499,9 @@ def test_edit_encodes_input_image(tmp_path, monkeypatch):
 
     assert code == 0
     assert seen["url"].endswith("/responses")
-    assert seen["payload"]["input"][0]["content"][1]["image_url"].startswith("data:image/png;base64,")
+    assert seen["payload"]["input"][0]["content"][1]["image_url"].startswith(
+        "data:image/webp;base64,"
+    )
     assert seen["payload"]["tools"][0]["type"] == "image_generation"
     assert output.read_bytes() == PNG_BYTES
 
@@ -662,7 +683,10 @@ def test_batch_accepts_jsonl_string_jobs(tmp_path, capsys):
     payload = json.loads(captured.out)
 
     assert code == 0
-    assert payload["payload"]["input"][0]["content"][0]["text"] == "A compact shuttle parked in a hangar"
+    assert (
+        payload["payload"]["input"][0]["content"][0]["text"]
+        == "A compact shuttle parked in a hangar"
+    )
     assert payload["outputs"][0].endswith("001-a-compact-shuttle-parked-in-a-hangar.png")
 
 
@@ -676,7 +700,7 @@ def test_size_rejects_unknown_value(tmp_path):
                 "--out",
                 str(tmp_path / "mug.png"),
                 "--size",
-                "2048x2048",
+                "1023x1024",
                 "--dry-run",
             ]
         )
