@@ -4,6 +4,12 @@ All notable changes to this project are documented in this file.
 
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses semantic versioning before its first stable release.
 
+## [Unreleased]
+
+### Added
+
+- `--aspect-ratio W:H` for `generate`, `edit`, and `batch`. The tested backend ignores the request's `size` field when framing the image, so the ratio is appended to the prompt as explicit framing guidance and the returned image is verified against it with `--size-policy`. Ratios from `1:3` to `3:1` are accepted; requests beyond that range are clamped by the backend and reported as a mismatch. `--aspect-ratio` and `--size` are mutually exclusive.
+
 ## [0.2.0] - 2026-09-15
 
 ### Changed

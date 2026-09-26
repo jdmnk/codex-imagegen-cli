@@ -48,6 +48,11 @@ MAX_RESPONSES_IMAGE_RETRIES = 4
 INPUT_IMAGE_RATE_LIMIT_DELAYS = (65.0, 130.0, 260.0, 300.0)
 DEFAULT_INPUT_MAX_EDGE = 1536
 DEFAULT_INPUT_WEBP_QUALITY = 90
+# The backend honors an aspect ratio only as prompt guidance and clamps beyond 1:3..3:1.
+ASPECT_RATIO_LIMIT = 3.0
+# Live checks returned the requested ratio within 0.1%; 2% still rejects a real mismatch
+# such as 2:3 (0.667) answered with 9:16 (0.563).
+ASPECT_RATIO_TOLERANCE = 0.02
 
 
 class CliError(Exception):
@@ -665,7 +670,7 @@ def _native_payload(
 ) -> dict[str, Any]:
     payload = {
         "model": NATIVE_REQUEST_MODEL,
-        "prompt": prompt,
+        "prompt": _prompt_with_aspect_ratio(prompt, args),
         "size": args.size,
         "quality": args.quality,
         "background": args.background,
@@ -684,7 +689,9 @@ def _responses_payload(
     mode: str,
     images: Sequence[Path] | None = None,
 ) -> dict[str, Any]:
-    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    content: list[dict[str, Any]] = [
+        {"type": "input_text", "text": _prompt_with_aspect_ratio(prompt, args)}
+    ]
     if images:
         if len(images) > MAX_EDIT_IMAGES:
             raise CliError(f"Edit supports at most {MAX_EDIT_IMAGES} images.")
@@ -732,6 +739,7 @@ def _write_response_image(
     webp_quality: int,
     requested_size: str = "auto",
     size_policy: str = "warn",
+    requested_aspect_ratio: str | None = None,
 ) -> Path:
     _check_output(output_path, force)
     if len(encoded) > ((MAX_IMAGE_BYTES + 2) // 3) * 4:
@@ -750,12 +758,20 @@ def _write_response_image(
             actual_size = f"{image.width}x{image.height}"
     except (OSError, ValueError, Image.DecompressionBombError) as exc:
         raise CliError(f"Image generation returned an invalid image: {exc}") from exc
-    if requested_size != "auto" and requested_size != actual_size:
-        message = f"Requested {requested_size}, backend returned {actual_size} for {output_path}."
+    mismatch = None
+    if requested_aspect_ratio is not None:
+        if _aspect_ratio_mismatch(requested_aspect_ratio, actual_size):
+            mismatch = (
+                f"Requested aspect ratio {requested_aspect_ratio}, backend returned "
+                f"{actual_size} for {output_path}."
+            )
+    elif requested_size != "auto" and requested_size != actual_size:
+        mismatch = f"Requested {requested_size}, backend returned {actual_size} for {output_path}."
+    if mismatch is not None:
         if size_policy == "error":
-            raise CliError(message + " Output was not written (--size-policy error).")
+            raise CliError(mismatch + " Output was not written (--size-policy error).")
         _warn(
-            message
+            mismatch
             + " Saving the original dimensions; use --size-policy error to reject mismatches."
         )
     _write_image_bytes(
@@ -960,6 +976,7 @@ def _call_backend(
                 webp_quality=args.webp_quality,
                 requested_size=args.size,
                 size_policy=args.size_policy,
+                requested_aspect_ratio=args.aspect_ratio,
             )
         )
         # Publish each successful path immediately, even if a later image fails.
@@ -1195,11 +1212,22 @@ def _add_image_args(parser: argparse.ArgumentParser) -> None:
         default="auto",
         help="Direct quality parameter.",
     )
-    parser.add_argument(
+    ratio_group = parser.add_mutually_exclusive_group()
+    ratio_group.add_argument(
         "--size",
         type=_parse_size,
         default="auto",
         help="Requested image dimensions: auto or WIDTHxHEIGHT. Backend may return a different size.",
+    )
+    ratio_group.add_argument(
+        "--aspect-ratio",
+        type=_parse_aspect_ratio,
+        default=None,
+        help=(
+            "Requested aspect ratio as W:H (for example 16:9, 2:3, 21:9). "
+            "Sent as prompt guidance because the backend ignores the size field; "
+            "the result is verified against the requested ratio. Not allowed with --size."
+        ),
     )
     parser.add_argument(
         "--size-policy",
@@ -1258,6 +1286,54 @@ def _parse_size(value: str) -> str:
         "Size must be auto or WIDTHxHEIGHT: multiples of 16, "
         "at most 3840 per edge, 1:3 to 3:1 aspect, 655360–8294400 pixels."
     )
+
+
+def _parse_aspect_ratio(value: str) -> str:
+    match = re.fullmatch(r"([1-9][0-9]{0,2}):([1-9][0-9]{0,2})", value)
+    if match:
+        width, height = map(int, match.groups())
+        ratio = width / height
+        if 1 / ASPECT_RATIO_LIMIT <= ratio <= ASPECT_RATIO_LIMIT:
+            return f"{width}:{height}"
+    raise argparse.ArgumentTypeError(
+        "Aspect ratio must be W:H between 1:3 and 3:1, for example 16:9, 2:3, or 21:9."
+    )
+
+
+def _aspect_ratio_value(aspect_ratio: str) -> float:
+    width, height = aspect_ratio.split(":")
+    return int(width) / int(height)
+
+
+def _prompt_with_aspect_ratio(prompt: str, args: argparse.Namespace) -> str:
+    ratio = getattr(args, "aspect_ratio", None)
+    return _aspect_ratio_prompt(prompt, ratio) if ratio else prompt
+
+
+def _aspect_ratio_prompt(prompt: str, aspect_ratio: str) -> str:
+    """Ask for the ratio in words: the backend ignores the request's size field.
+
+    The instruction leads the prompt so the framing is set before the scene is
+    described, matching how the style-library templates order ratio constraints.
+    """
+    value = _aspect_ratio_value(aspect_ratio)
+    if value == 1:
+        instruction = "The frame must be a 1:1 square."
+    elif value > 1:
+        instruction = (
+            f"The frame must be in {aspect_ratio} landscape format, wider than it is tall."
+        )
+    else:
+        instruction = (
+            f"The frame must be in {aspect_ratio} portrait format, taller than it is wide."
+        )
+    return f"{instruction}\n\n{prompt}"
+
+
+def _aspect_ratio_mismatch(aspect_ratio: str, size: str) -> bool:
+    width, height = (int(part) for part in size.split("x"))
+    requested = _aspect_ratio_value(aspect_ratio)
+    return abs(width / height - requested) / requested > ASPECT_RATIO_TOLERANCE
 
 
 def _validate_common(args: argparse.Namespace) -> Path:

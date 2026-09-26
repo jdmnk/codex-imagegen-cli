@@ -183,6 +183,8 @@ Each line can be either a JSON string prompt or an object with:
 
 Per-job validation or backend failures are reported and later jobs continue unless `--fail-fast` is set. Any failed job produces exit status 1.
 
+Image options such as `--size` and `--aspect-ratio` are CLI flags and apply to every job in the run.
+
 ## Useful Flags
 
 - `--prompt-file prompt.txt`: read the prompt from a file
@@ -197,7 +199,8 @@ Per-job validation or backend failures are reported and later jobs continue unle
 - `--background auto|opaque`: direct `background` parameter. Explicit `transparent` is unsupported on the tested backend and rejected locally.
 - `--quality auto|low|medium|high`: direct `quality` parameter.
 - `--size auto|WIDTHxHEIGHT`: requested dimensions; see constraints below.
-- `--size-policy warn|error`: on a dimension mismatch, warn and save (default), or fail without writing the output.
+- `--aspect-ratio W:H`: requested aspect ratio (for example `16:9`, `2:3`, `21:9`). The backend ignores the request's `size` field, so the ratio is sent as prompt guidance and the returned image is verified against it. Not allowed together with `--size`. See aspect ratios below.
+- `--size-policy warn|error`: on a dimension or aspect-ratio mismatch, warn and save (default), or fail without writing the output.
 - `--style-image PATH`: edit mode only. Use this image as the style reference; `--image` stays the content image and `--prompt` becomes optional extra guidance.
 - `--output-format auto|png|webp`: output file format. Default: infer from `--out`; `.webp` writes WebP, everything else writes PNG.
 - `--webp-quality 1..100`: WebP encoder quality. Default: `85`.
@@ -270,6 +273,38 @@ The accepted image preference values are:
 - `background`: `auto` or `opaque`
 
 Requested dimensions are not guaranteed. The CLI reports actual dimensions and warns on mismatches by default. `--size-policy error` rejects a mismatched output without saving it, even with `--force`; the generation has already occurred and may have consumed usage. The CLI does not resize or crop output to match the request.
+
+### Aspect ratios
+
+`--size` does not control the aspect ratio. The tested backend ignores the request's `size` field for framing and returns its own dimensions, so `--size 1024x1536` can come back as a square. What does control the ratio is the prompt: `--aspect-ratio W:H` prepends explicit framing guidance to the prompt and then verifies the returned image against that ratio using `--size-policy`.
+
+```bash
+codex-imagegen generate --prompt "A lighthouse at dusk" --out out.png --aspect-ratio 2:3
+codex-imagegen generate --prompt "A wide banner" --out banner.png --aspect-ratio 21:9
+```
+
+The framing instruction leads the prompt, so the ratio is set before the scene is described:
+
+```text
+The frame must be in 2:3 portrait format, taller than it is wide.
+
+A lighthouse at dusk
+```
+
+Ratios are accepted between `1:3` and `3:1`. Live checks on the tested backend returned the requested ratio every time, with the frame size following the ratio at a roughly constant pixel budget:
+
+| Requested | Returned | Returned ratio |
+| --- | --- | --- |
+| `1:1` | `1254x1254` | 1.000 |
+| `3:4` | `1086x1448` | 0.750 |
+| `2:3` | `1024x1536` | 0.667 |
+| `9:16` | `941x1672` | 0.563 |
+| `1:2` | `887x1774` | 0.500 |
+| `16:9` | `1672x941` | 1.777 |
+| `21:9` | `1916x821` | 2.334 |
+| `3:1` | `2172x724` | 3.000 |
+
+Requests beyond 3:1 are rejected locally, because the backend clamps them to roughly 3:1 (a live `4:1` request came back at `2172x724`) and would otherwise surface as a mismatch only after spending usage. Because the exact returned size is chosen by the backend, treat `--aspect-ratio` as a way to get the framing right, not as a way to pin exact pixels; crop or pad afterwards if a fixed pixel size is required. The CLI never silently resizes or crops the returned image to hide a mismatch.
 
 `n` is handled by the CLI by running one hosted image request per output path.
 For edit jobs, repeated outputs may wait for the per-minute input-image quota window before retrying; if the bucket stays full, retries back off progressively.
